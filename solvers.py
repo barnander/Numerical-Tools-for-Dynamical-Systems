@@ -24,11 +24,28 @@ def solve_to(f,initial_conds, t_final, delta_max, solver = 'Euler'):
     elif solver == 'RK4':
         solve_step = rk4_step
 
-    while ode_state['t_n'] < t_final:
+    time = np.arange(t_0,t_final+ delta_max/2,delta_max)
+    x = x_0
+    for t in time[:-1]:
+        ode_state = solve_step(f,ode_state,delta_max)
+        x = np.column_stack((x,ode_state['x_n']))
+
+    return time,x
+    
+"""     no_timesteps = int((t_final-t_0)/delta_max)+ 1
+    time = np.zeros(no_timesteps)
+    time[0] = t_0
+    x = np.zeros((len(x_0),no_timesteps))
+    x[:,0] = x_0
+    counter = 1 """
+"""     #while ode_state['t_n'] < t_final:
         #iterate through functions, computing the next value for each state variable
         ode_state = solve_step(f,ode_state,delta_max)
-    return ode_state 
-
+        time[counter] = ode_state['t_n']
+        x[:,counter] = ode_state['x_n']
+        counter+=1
+ """
+ 
 
 #one step solver functions
 def euler_step(f,ode_state,h):
@@ -56,5 +73,22 @@ def rk4_step(f,ode_state,h):
 
 
 
-def f(t,x):
-    return np.array([x[1],-x[0]])
+#%%
+import numpy as np
+import matplotlib.pyplot as plt
+import solvers
+
+def f_second_order(t,x):
+    x_dot = x[1]
+    y_dot = -x[0]
+    return np.array([x_dot,y_dot])
+
+
+x0 = 0
+y0 = 1
+initial_conds = {'t':0,'x':np.array([x0,y0])}
+t_final = 1
+h = 0.1
+time,x = solvers.solve_to(f_second_order,initial_conds,t_final,h)
+
+plt.plot(time,x[1])
