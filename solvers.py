@@ -1,6 +1,4 @@
 #%% Packages
-%reload_ext autoreload
-%autoreload 2
 import numpy as np
 #%% Functions
 #one-step solvers wrapper
@@ -35,14 +33,12 @@ def solve_to(f,initial_conds, t_final, delta_max, solver = 'Euler'):
     time[0] = t_0
     x = np.zeros((len(x_0),no_timesteps+1))
     x[:,0] = x_0
-    counter = 1 
-    while ode_state['t_n'] < t_final:
+    for i in range(1,no_timesteps+1):
         #iterate through functions, computing the next value for each state variable
         h = min(delta_max, t_final - ode_state['t_n']) #adapts the final h to give the solution at exactly t_final
         ode_state = solve_step(f,ode_state,h)
-        time[counter] = ode_state['t_n']
-        x[:,counter] = ode_state['x_n']
-        counter+=1
+        time[i] = ode_state['t_n']
+        x[:,i] = ode_state['x_n']
     return time,x
  
 
