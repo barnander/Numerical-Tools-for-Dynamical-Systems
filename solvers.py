@@ -2,22 +2,23 @@
 import numpy as np
 #%% Functions
 #one-step solvers wrapper
-def solve_to(f,initial_conds, t_final, delta_max, solver = 'Euler'):
+def solve_to(f_gen,ode_params,initial_conds, t_final, delta_max, solver = 'Euler'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
     to the specified endpoint (t_final) 
 
     Args:
-        f (function): returns derivatives of system of odes as np array
+        f_gen (function): function describing system of odes with state variable and constant parameter input
         initial_conds (dict): 't' points to initial time, 'x' points to an np array of initial values in the state space
         t_final (float): end time
         delta_max (float): max step size
         solver (string): solver used
     """
+
+    f = wrap_f(f_gen,ode_params)
     x_0 = initial_conds['x']
     t_0 = initial_conds['t']   
     ode_state = {'x_n':x_0,'t_n':t_0}
-    
     #choose one-step solver  
     if solver == 'Euler':
         solve_step = euler_step
@@ -41,6 +42,12 @@ def solve_to(f,initial_conds, t_final, delta_max, solver = 'Euler'):
         x[:,i] = ode_state['x_n']
     return time,x
  
+
+#hard encoding parameters to function
+def wrap_f(f_gen,ode_params):
+    def f(t,x):
+        return f_gen(t,x,ode_params)
+    return(f)
 
 #one step solver functions
 def euler_step(f,ode_state,h):
