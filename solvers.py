@@ -1,24 +1,28 @@
 #%% Packages
 import numpy as np
 #%% Functions
+
 #one-step solvers wrapper
-def solve_to(f_gen,ode_params,initial_conds, t_final, delta_max, solver = 'Euler'):
+def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'Euler'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
-    to the specified endpoint (t_final) 
+    to the specified endpoint (t_f) 
 
-    Args:
-        f_gen (function): function describing system of odes with state variable and constant parameter input
-        initial_conds (dict): 't' points to initial time, 'x' points to an np array of initial values in the state space
-        t_final (float): end time
+    Parameters:
+        f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
+        ICs (dict): initial conditions 't' key points to initial t, 'x' key points to an np array of initial values in the state space
+        t_f (float): end time
         delta_max (float): max step size
         solver (string): solver used
-    """
+    Returns:
+        x (np array): 2D array where each row is a time series of the state variables over time period input
+        t (np array): value of time at every computed x
 
-    f = wrap_f(f_gen,ode_params)
-    x_0 = initial_conds['x']
-    t_0 = initial_conds['t']   
-    ode_state = {'x_n':x_0,'t_n':t_0}
+    """
+    f = wrap_f(f_gen,p)
+    x0 = ICs['x']
+    t0 = ICs['t']   
+    ode_state = {'x_n':x0,'t_n':t0}
     #choose one-step solver  
     if solver == 'Euler':
         solve_step = euler_step
@@ -27,32 +31,47 @@ def solve_to(f_gen,ode_params,initial_conds, t_final, delta_max, solver = 'Euler
     else:
         raise ValueError("Unsupported solver: {}".format(solver))
     
-    total_time = t_final - t_0
+    total_time = t_f - t0
     no_timesteps = int(np.ceil(total_time/delta_max))
 
-    time = np.zeros(no_timesteps+1) #plus 1 so we include t0 and t_final
-    time[0] = t_0
-    x = np.zeros((len(x_0),no_timesteps+1))
-    x[:,0] = x_0
+    t = np.zeros(no_timesteps+1) #plus 1 so we include t0 and t_f
+    t[0] = t0
+    x = np.zeros((len(x0),no_timesteps+1))
+    x[:,0] = x0
     for i in range(1,no_timesteps+1):
         #iterate through functions, computing the next value for each state variable
-        h = min(delta_max, t_final - ode_state['t_n']) #adapts the final h to give the solution at exactly t_final
+        h = min(delta_max, t_f - ode_state['t_n']) #adapts the final h to give the solution at exactly t_final
         ode_state = solve_step(f,ode_state,h)
-        time[i] = ode_state['t_n']
+        t[i] = ode_state['t_n']
         x[:,i] = ode_state['x_n']
-    return x,time
+    return x,t
  
 
-#hard encoding parameters to function
-def wrap_f(f_gen,ode_params):
+def wrap_f(f_gen,p):
+    """
+    Hard encodes ode parameter constants to the function
+
+    Parameters:
+        f_gen (function): function determining system in terms of x, t, and p
+        p (np.array): constant parameters of system used for numerical integration   
+    Returns:
+        f (function): function determining system in terms of x and t (p are hard encoded)
+    """
     def f(x,t):
-        return f_gen(x,t,ode_params)
+        return f_gen(x,t,p)
     return(f)
 
 #one step solver functions
 def euler_step(f,ode_state,h):
     """
-    ode_state: type: dictionary
+    Computes one step of numerical integration using Euler method
+
+    Parameters:
+        f (function): function determining system in terms of x and t
+        ode_state (dict): contains current values of space variables (key = 'x_n') and time (key = 't_n')
+        h (float): size of euler step
+    Returns:
+        ode_state (dict): updated state of variables after euler step
     """
     x_n = ode_state['x_n']
     t_n = ode_state['t_n']
@@ -62,6 +81,16 @@ def euler_step(f,ode_state,h):
     return ode_state
 
 def rk4_step(f,ode_state,h):
+    """
+    Computes one step of numerical integration using Runge Kutta 4th order method (RK4)
+
+    Parameters:
+        f (function): function determining system in terms of x and t
+        ode_state (dict): contains current values of space variables (key = 'x_n') and time (key = 't_n')
+        h (float): size of RK4 step
+    Returns:
+        ode_state (dict): updated state of variables after RK4 order step
+    """
     x_n = ode_state['x_n']
     t_n = ode_state['t_n']
     k1 = f(x_n,t_n)
