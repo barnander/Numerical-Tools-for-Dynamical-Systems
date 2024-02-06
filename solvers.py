@@ -40,13 +40,13 @@ def solve_to(f_gen,ode_params,initial_conds, t_final, delta_max, solver = 'Euler
         ode_state = solve_step(f,ode_state,h)
         time[i] = ode_state['t_n']
         x[:,i] = ode_state['x_n']
-    return time,x
+    return x,time
  
 
 #hard encoding parameters to function
 def wrap_f(f_gen,ode_params):
-    def f(t,x):
-        return f_gen(t,x,ode_params)
+    def f(x,t):
+        return f_gen(x,t,ode_params)
     return(f)
 
 #one step solver functions
@@ -56,7 +56,7 @@ def euler_step(f,ode_state,h):
     """
     x_n = ode_state['x_n']
     t_n = ode_state['t_n']
-    x_n_plus_1 = x_n + h*f(t_n,x_n)
+    x_n_plus_1 = x_n + h*f(x_n,t_n)
     ode_state['x_n'] = x_n_plus_1
     ode_state['t_n'] = ode_state['t_n'] + h
     return ode_state
@@ -64,10 +64,10 @@ def euler_step(f,ode_state,h):
 def rk4_step(f,ode_state,h):
     x_n = ode_state['x_n']
     t_n = ode_state['t_n']
-    k1 = f(t_n,x_n)
-    k2 = f(t_n + h/2,x_n + h*k1/2)
-    k3 = f(t_n + h/2,x_n + h*k2/2)
-    k4 = f(t_n + h, x_n + h*k3)
+    k1 = f(x_n,t_n)
+    k2 = f(x_n + h*k1/2,t_n + h/2)
+    k3 = f(x_n + h*k2/2,t_n + h/2)
+    k4 = f(x_n + h*k3,t_n + h)
     x_n_plus_1 = x_n + h/6*(k1+2*k2+2*k3+k4)
     ode_state['x_n'] = x_n_plus_1
     ode_state['t_n'] = ode_state['t_n'] + h
