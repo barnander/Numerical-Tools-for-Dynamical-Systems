@@ -1,6 +1,5 @@
 #%%
-%reload_ext autoreload
-%autoreload 2
+
 
 # %% Import packages a solvers module
 import time
