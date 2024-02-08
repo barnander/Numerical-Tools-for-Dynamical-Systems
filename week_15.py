@@ -57,4 +57,29 @@ plt.scatter(np.arange(0,len(delta_t)),y)
 
 
 
+#%%
+# System of ODEs generator
+def f_gen(x, t, p):
+    y, v = x  # Unpacking the state variables
+    lambda_ = p[0]  # Unpacking the parameter
+    dydt = v
+    dvdt = -lambda_ * y
+    return np.array([dydt, dvdt])
+
+# Initial conditions (guess)
+ICs = {'t': 0, 'x': np.array([0.1, 0.1])}  # Small non-zero initial guess to start iteration
+t_f = 1  # End of the domain
+delta_max = 0.01  # Maximum step size
+L = 3  # Length of the domain
+lambda_ = np.pi**2 / L**2  # Parameter value
+p = np.array([lambda_])  # Parameter for the ODE system
+
+# Boundary conditions
+BCs = np.array([0, 0])  # y(0) = 0, y(L) = 0, but we only directly enforce y(L) = 0
+
+x,t = solvers.bvp_solve(f_gen,p,ICs,t_f,delta_max,BCs)
+
+# %%
+plt.plot(x[0],x[1])
+
 # %%

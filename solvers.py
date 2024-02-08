@@ -1,9 +1,8 @@
 #%% Packages
 import numpy as np
 #%% Functions
-
 #one-step solvers wrapper
-def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'Euler'):
+def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'RK4'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
     to the specified endpoint (t_f) 
@@ -23,7 +22,8 @@ def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'Euler'):
     x0 = ICs['x']
     t0 = ICs['t']   
     ode_state = {'x_n':x0,'t_n':t0}
-    #choose one-step solver  
+    #choose one-step solver
+
     if solver == 'Euler':
         solve_step = euler_step
     elif solver == 'RK4':
@@ -45,7 +45,8 @@ def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'Euler'):
         t[i] = ode_state['t_n']
         x[:,i] = ode_state['x_n']
     return x,t
- 
+
+
 
 def wrap_f(f_gen,p):
     """
@@ -102,6 +103,28 @@ def rk4_step(f,ode_state,h):
     ode_state['t_n'] = ode_state['t_n'] + h
     return ode_state
 
+def finite_dif(f_x,f_x_plus_h,h):
+    dif = (f_x_plus_h-f_x)/h
+    return dif
+
+def newton_meth(f,dif,x_n):
+    x_n_plus_1 = x_n - f/dif
+    return x_n_plus_1
 
 
 
+
+def bvp_solve(f_gen,p,ICs,t_f, delta_max,BCs,solver = 'RK4',h=1e-7):
+    f_x = np.ones(BCs.shape)+h
+    while (np.abs(f_x)>h).all():
+        x,t  = solve_to(f_gen,p,ICs,t_f, delta_max,solver)
+        ICs_plus_h = ICs
+        ICs_plus_h['x'] += h
+        x_plus_h,_ = solve_to(f_gen,p,ICs_plus_h,t_f, delta_max,solver)
+        f_x = x[:,-1]-BCs
+        f_x_plus_h = x_plus_h[:,-1]- BCs
+        dif = finite_dif(f_x,f_x_plus_h,h)
+        ICs['x'] = newton_meth(f_x,dif,ICs['x'])
+    return x,t
+
+# %%
