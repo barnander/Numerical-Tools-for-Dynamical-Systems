@@ -1,8 +1,9 @@
 #%% Packages
 import numpy as np
+import scipy.optimize as opt
 #%% Functions
 #one-step solvers wrapper
-def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'RK4'):
+def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
     to the specified endpoint (t_f) 
@@ -19,9 +20,6 @@ def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'RK4'):
 
     """
     f = wrap_f(f_gen,p)
-    x0 = ICs['x']
-    t0 = ICs['t']   
-    ode_state = {'x_n':x0,'t_n':t0}
     #choose one-step solver
 
     if solver == 'Euler':
@@ -38,12 +36,14 @@ def solve_to(f_gen,p,ICs,t_f, delta_max,solver = 'RK4'):
     t[0] = t0
     x = np.zeros((len(x0),no_timesteps+1))
     x[:,0] = x0
+
+    x_n,t_n=x0,t0
     for i in range(1,no_timesteps+1):
         #iterate through functions, computing the next value for each state variable
-        h = min(delta_max, t_f - ode_state['t_n']) #adapts the final h to give the solution at exactly t_final
-        ode_state = solve_step(f,ode_state,h)
-        t[i] = ode_state['t_n']
-        x[:,i] = ode_state['x_n']
+        h = min(delta_max, t_f - t_n) #adapts the final h to give the solution at exactly t_final
+        x_n,t_n = solve_step(f,x_n,t_n,h)
+        x[:,i] = x_n
+        t[i] = t_n
     return x,t
 
 
@@ -63,7 +63,7 @@ def wrap_f(f_gen,p):
     return(f)
 
 #one step solver functions
-def euler_step(f,ode_state,h):
+def euler_step(f,x_n,t_n,h):
     """
     Computes one step of numerical integration using Euler method
 
@@ -74,14 +74,10 @@ def euler_step(f,ode_state,h):
     Returns:
         ode_state (dict): updated state of variables after euler step
     """
-    x_n = ode_state['x_n']
-    t_n = ode_state['t_n']
     x_n_plus_1 = x_n + h*f(x_n,t_n)
-    ode_state['x_n'] = x_n_plus_1
-    ode_state['t_n'] = ode_state['t_n'] + h
-    return ode_state
+    return x_n_plus_1,t_n+h
 
-def rk4_step(f,ode_state,h):
+def rk4_step(f,x_n,t_n,h):
     """
     Computes one step of numerical integration using Runge Kutta 4th order method (RK4)
 
@@ -92,39 +88,56 @@ def rk4_step(f,ode_state,h):
     Returns:
         ode_state (dict): updated state of variables after RK4 order step
     """
-    x_n = ode_state['x_n']
-    t_n = ode_state['t_n']
     k1 = f(x_n,t_n)
     k2 = f(x_n + h*k1/2,t_n + h/2)
     k3 = f(x_n + h*k2/2,t_n + h/2)
     k4 = f(x_n + h*k3,t_n + h)
     x_n_plus_1 = x_n + h/6*(k1+2*k2+2*k3+k4)
-    ode_state['x_n'] = x_n_plus_1
-    ode_state['t_n'] = ode_state['t_n'] + h
-    return ode_state
+    return x_n_plus_1,t_n + h
 
-def finite_dif(f_x,f_x_plus_h,h):
-    dif = (f_x_plus_h-f_x)/h
-    return dif
+# def finite_dif(f_x,f_x_plus_h,h):
+#     dif = (f_x_plus_h-f_x)/h
+#     return dif
 
-def newton_meth(f,dif,x_n):
-    x_n_plus_1 = x_n - f/dif
-    return x_n_plus_1
+# def newton_meth(f,dif,x_n):
+#     x_n_plus_1 = x_n - f/dif
+#     return x_n_plus_1
 
 
 
+def BVP_solve(f_gen,p,init_guess,t_f, delta_max,solver = 'RK4'):
+    # f_x = np.ones(BCs.shape)+h
+    # while (np.abs(f_x)>h).all():
+    #     x,t  = solve_to(f_gen,p,ICs,t_f, delta_max,solver)
+    #     ICs_plus_h = ICs
+    #     ICs_plus_h['x'] += h
+    #     x_plus_h,_ = solve_to(f_gen,p,ICs_plus_h,t_f, delta_max,solver)
+    #     f_x = x[:,-1]-BCs
+    #     f_x_plus_h = x_plus_h[:,-1]- BCs
+    #     dif = finite_dif(f_x,f_x_plus_h,h)
+    #     ICs['x'] = newton_meth(f_x,dif,ICs['x'])
+    # return x,t
 
-def bvp_solve(f_gen,p,ICs,t_f, delta_max,BCs,solver = 'RK4',h=1e-7):
-    f_x = np.ones(BCs.shape)+h
-    while (np.abs(f_x)>h).all():
-        x,t  = solve_to(f_gen,p,ICs,t_f, delta_max,solver)
-        ICs_plus_h = ICs
-        ICs_plus_h['x'] += h
-        x_plus_h,_ = solve_to(f_gen,p,ICs_plus_h,t_f, delta_max,solver)
-        f_x = x[:,-1]-BCs
-        f_x_plus_h = x_plus_h[:,-1]- BCs
-        dif = finite_dif(f_x,f_x_plus_h,h)
-        ICs['x'] = newton_meth(f_x,dif,ICs['x'])
+
+    #define function to root solve using  newton solver
+    def g(x0_T):
+        """
+        Parameters:
+            x0_T (np array): array of initial conditions and time 
+        """
+        ICs = {'x':x0,'t':IC_guess['t']}
+        x,_ = solve_to(f_gen,p,ICs,t_f,delta_max,solver = solver)
+        x_bound = x[:,-1]
+        return x_bound-x0
+    
+    #run scipy newton root-finder on func_solve
+    x0_solved = opt.newton(func_solve,IC_guess['x'])
+    IC_solved = {'x':x0_solved,'t':IC_guess['t']}
+
+    #compute time-series for correct initial conditions
+    x,t = solve_to(f_gen,p,IC_solved,t_f,delta_max,solver = solver)
     return x,t
+
+
 
 # %%
