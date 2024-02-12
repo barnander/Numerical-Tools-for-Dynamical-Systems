@@ -32,6 +32,7 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     total_time = t_f - t0
     no_timesteps = int(np.ceil(total_time/delta_max))
 
+    #initialise t and x arrays
     t = np.zeros(no_timesteps+1) #plus 1 so we include t0 and t_f
     t[0] = t0
     x = np.zeros((len(x0),no_timesteps+1))
@@ -105,21 +106,20 @@ def rk4_step(f,x_n,t_n,h):
 
 
 
-def BVP_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4',LC = True):
-    # f_x = np.ones(BCs.shape)+h
-    # while (np.abs(f_x)>h).all():
-    #     x,t  = solve_to(f_gen,p,ICs,t_f, delta_max,solver)
-    #     ICs_plus_h = ICs
-    #     ICs_plus_h['x'] += h
-    #     x_plus_h,_ = solve_to(f_gen,p,ICs_plus_h,t_f, delta_max,solver)
-    #     f_x = x[:,-1]-BCs
-    #     f_x_plus_h = x_plus_h[:,-1]- BCs
-    #     dif = finite_dif(f_x,f_x_plus_h,h)
-    #     ICs['x'] = newton_meth(f_x,dif,ICs['x'])
-    # return x,t
+def shoot_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4',LC = True):
+    """
+    Finds limit cycles (LC) using  numerical shooting (potentially generalise to all BVPs later)
+    Parameters:
+        f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
+        p (np array): parameters of system of equations
+        init_guess (np array): initial guess for a point on the LC [0:-1], and for the period T [-1]
+        conds (function): definition of phase condition when LC=True, or definition of BCs and phase condition when LC = False
+        delta_max (float): max step size
+        solver (string): solver used in integrator
+        LC (boolean): if True, solving for a limit cycle
+    """
 
-
-    #define function to root solve using  newton solver
+    #define function to root solve using  newton solver for limit cycles
     if LC:
         def g(x0_T):
             """
@@ -130,13 +130,16 @@ def BVP_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4',LC = True):
             x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
             xf = x[:,-1]
             BC = xf-x0
-            PC = x0[0]-0.3
-
+            PC = conds(x0_T)
+            #PC = f_gen(x0,0,p)[0]
             return np.append(BC,PC)
     
+    else:
+        g = conds
+    
     #run scipy newton root-finder on func_solve
-    x0_T_solved = opt.newton(g,init_guess)
+    x0_T_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #match rootfinder tol to integrator tol
 
-    return x0_T_solved
+    return x0_T_solved[:-1], x0_T_solved[-1]
 
 # %%

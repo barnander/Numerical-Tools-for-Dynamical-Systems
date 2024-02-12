@@ -10,19 +10,17 @@ def LK_model(x,t,p):
 
 #%% 
 a = 1
-d=0.1
+d=0.11
 # %%
-b1=0.2
+b1=0.1
 b2 = 0.3
-x0 = 0.2
-y0 = 0.1
+x0 = np.array([0.2,0.1])
 t0 = 0
-t_final = 500
-initial_conds = {'t':t0,'x':np.array([x0,y0])} 
+t_final = 100
 ode_params = np.array([a,b1,d])
 delta_max = 1e-3
 
-x,t = solvers.solve_to(LK_model,ode_params,initial_conds,t_final,delta_max,solver = 'RK4')
+x,t = solvers.solve_to(LK_model,ode_params,x0,t0,t_final,delta_max,solver = 'RK4')
 
 
 
@@ -58,28 +56,13 @@ plt.scatter(np.arange(0,len(delta_t)),y)
 
 
 #%%
-# System of ODEs generator
-def f_gen(x, t, p):
-    y, v = x  # Unpacking the state variables
-    lambda_ = p[0]  # Unpacking the parameter
-    dydt = v
-    dvdt = -lambda_ * y
-    return np.array([dydt, dvdt])
 
-# Initial conditions (guess)
-ICs = {'t': 0, 'x': np.array([0.1, 0.1])}  # Small non-zero initial guess to start iteration
-t_f = 1  # End of the domain
-delta_max = 0.01  # Maximum step size
-L = 3  # Length of the domain
-lambda_ = np.pi**2 / L**2  # Parameter value
-p = np.array([lambda_])  # Parameter for the ODE system
+def phase_cond(x0_T):
+    return LK_model(x0_T[:-1],0,ode_params)[0]
 
-# Boundary conditions
-BCs = np.array([0, 0])  # y(0) = 0, y(L) = 0, but we only directly enforce y(L) = 0
-
-x,t = solvers.bvp_solve(f_gen,p,ICs,t_f,delta_max,BCs)
+x_LC,t_LC = solvers.shoot_solve(LK_model,ode_params,np.array([0.6,0.35,30]),phase_cond, delta_max)
 
 # %%
-plt.plot(x[0],x[1])
+x,t = solvers.solve_to(LK_model,ode_params,x_LC,0,t_LC,delta_max)
 
 # %%
