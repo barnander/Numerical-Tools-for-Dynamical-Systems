@@ -10,13 +10,13 @@ def LK_model(x,t,p):
 
 #%% 
 a = 1
-d=0.11
+d=0.1
 # %%
-b1=0.1
+b1=0.2
 b2 = 0.3
-x0 = np.array([0.2,0.1])
+x0 = np.array([0.3,0.25])
 t0 = 0
-t_final = 100
+t_final = 200
 ode_params = np.array([a,b1,d])
 delta_max = 1e-3
 
@@ -60,7 +60,7 @@ plt.scatter(np.arange(0,len(delta_t)),y)
 def phase_cond(x0_T):
     return LK_model(x0_T[:-1],0,ode_params)[0]
 
-x_LC,t_LC = solvers.shoot_solve(LK_model,ode_params,np.array([0.6,0.35,30]),phase_cond, delta_max)
+x_LC,t_LC = solvers.shoot_solve(LK_model,ode_params,np.array([0.1,0.1,22]),phase_cond, delta_max)
 
 # %%
 x,t = solvers.solve_to(LK_model,ode_params,x_LC,0,t_LC,delta_max)
