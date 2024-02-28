@@ -106,7 +106,7 @@ def rk4_step(f,x_n,t_n,h):
 
 
 
-def shoot_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4',LC = True):
+def shoot_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4'):
     """
     Finds limit cycles (LC) using  numerical shooting (potentially generalise to all BVPs later)
     Parameters:
@@ -120,26 +120,56 @@ def shoot_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4',LC = True):
     """
 
     #define function to root solve using  newton solver for limit cycles
-    if LC:
-        def g(x0_T):
-            """
-            Parameters:
-                x0_T (np array): array of initial conditions and time 
-            """
-            x0,T = x0_T[:-1],x0_T[-1]
-            x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
-            xf = x[:,-1]
-            BC = xf-x0
-            PC = conds(x0_T)
-            #PC = f_gen(x0,0,p)[0]
-            return np.append(BC,PC)
-    
-    else:
-        g = conds
+    def g(x0_T):
+        """
+        Parameters:
+            x0_T (np array): array of initial conditions and time 
+        """
+        x0,T = x0_T[:-1],x0_T[-1]
+        x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
+        xf = x[:,-1]
+        BC = xf-x0
+        PC = f_gen(x0,0,p)[0]
+        return np.append(BC,PC)
+
     
     #run scipy newton root-finder on func_solve
     x0_T_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #match rootfinder tol to integrator tol
 
     return x0_T_solved[:-1], x0_T_solved[-1]
 
-# %%
+
+
+def natural_p_cont(ode,p0,pend,x0,n=100):
+    """
+    Performs natural parameter continuation on system of ODEs
+
+    
+    """
+    #check that p0 and pend are the same type, length and that only one parameter changes:
+    assert type(pend) == type(p0), "pend and p0 must be the same type"
+    
+    if type(p0) == np.ndarray:
+        assert len(p0) == len(pend), "p0 and pend should have the same length"
+        assert ((pend-p0)==0).sum() == len(p0)-1, "natural_p_cont only supports variation in one parameter"
+
+    ps = np.linspace(p0,pend,n).transpose()
+    x = np.tile(np.nan,(np.size(x0),n))
+    for i,p in enumerate([ps[:,i] for i in range(n)]):
+        sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
+        x[:,i] = sol
+        x0 = sol
+    return ps,x
+
+
+def secant_meth(ode,v0,v1,pend, max_it = 1e4):
+    vi_minus_1 = v0
+    vi = v1
+    for i in range(max_it):
+        secant = vi - vi_minus_1
+        v_guess = vi + secant
+        
+
+
+
+
