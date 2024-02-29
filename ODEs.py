@@ -27,7 +27,7 @@ def Transcritical(x,t,p):
     Returns:
         -dx (np array): derivative  
     """
-    dx = p[0]*x - x**2
+    dx = p*x - x**2
     return dx
 
 def Pitchfork_Super(x,t,p):

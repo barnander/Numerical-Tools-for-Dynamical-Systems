@@ -106,7 +106,7 @@ def rk4_step(f,x_n,t_n,h):
 
 
 
-def shoot_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4'):
+def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
     """
     Finds limit cycles (LC) using  numerical shooting (potentially generalise to all BVPs later)
     Parameters:
@@ -118,29 +118,34 @@ def shoot_solve(f_gen,p,init_guess,conds, delta_max,solver = 'RK4'):
         solver (string): solver used in integrator
         LC (boolean): if True, solving for a limit cycle
     """
-
+    if not phase_cond:
+        def pc(x,t,p):
+            return f_gen(x,0,p)[0]
+    else:
+        pc = phase_cond
+    
     #define function to root solve using  newton solver for limit cycles
-    def g(x0_T):
+    def g(x_T0):
         """
         Parameters:
-            x0_T (np array): array of initial conditions and time 
+            x_T0 (np array): array of initial conditions and time 
         """
-        x0,T = x0_T[:-1],x0_T[-1]
+        x0,T = x_T0[:-1],x_T0[-1]
         x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
         xf = x[:,-1]
         BC = xf-x0
-        PC = f_gen(x0,0,p)[0]
+        PC = pc(x0,T,p)
         return np.append(BC,PC)
 
     
     #run scipy newton root-finder on func_solve
-    x0_T_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #match rootfinder tol to integrator tol
+    x_T0_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #match rootfinder tol to integrator tol
 
-    return x0_T_solved[:-1], x0_T_solved[-1]
+    return x_T0_solved[:-1], x_T0_solved[-1]
 
 
 
-def natural_p_cont(ode,p0,pend,x0,n=100):
+def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=100,Eqm_only=False):
     """
     Performs natural parameter continuation on system of ODEs
 
@@ -152,13 +157,28 @@ def natural_p_cont(ode,p0,pend,x0,n=100):
     if type(p0) == np.ndarray:
         assert len(p0) == len(pend), "p0 and pend should have the same length"
         assert ((pend-p0)==0).sum() == len(p0)-1, "natural_p_cont only supports variation in one parameter"
-
+    elif type(p0) == float:
+        p0,pend = np.array([p0]),np.array([pend])
+    else:
+        raise ValueError("p0 and pend must be np.ndarray or float type")
+    
     ps = np.linspace(p0,pend,n).transpose()
-    x = np.tile(np.nan,(np.size(x0),n))
-    for i,p in enumerate([ps[:,i] for i in range(n)]):
-        sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
-        x[:,i] = sol
-        x0 = sol
+    x = np.tile(np.nan,(np.size(x_T0),n))
+
+
+    if Eqm_only:
+        x0 = x_T0
+        for i,p in enumerate([ps[:,i] for i in range(n)]):
+            sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
+            x[:,i] = sol
+            x0=sol
+    else:
+        for i,p in enumerate([ps[:,i] for i in range(n)]):
+            #sol = opt.fsolve(lambda x: ode(x,np.nan,p),x_T0)
+            sol,T0 = shoot_solve(ode,p,x_T0,delta_max)
+            x[:,i] = sol
+            x_T0 = np.append(sol,T0)      
+    
     return ps,x
 
 
