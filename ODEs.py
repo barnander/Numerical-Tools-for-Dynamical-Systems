@@ -55,5 +55,5 @@ def Hopf_Super(x,t,p):
     """
     dx = p*x[0] + x[1]
     dy = -x[0] + p*x[1] - x[0]**2 * x[1]
-    deriv = np.array([dx,dy])
+    deriv = np.append(dx,dy)
     return deriv

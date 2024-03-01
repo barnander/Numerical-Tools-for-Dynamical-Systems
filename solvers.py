@@ -30,6 +30,11 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
         raise ValueError("Unsupported solver: {}".format(solver))
     
     total_time = t_f - t0
+
+    #make function robust to too small time scales
+    if total_time < 2*delta_max:
+        print("The duration of the integration is shorther than delta max")
+        return np.array([x0]),t0
     no_timesteps = int(np.ceil(total_time/delta_max))
 
     #initialise t and x arrays
@@ -145,7 +150,7 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
 
 
 
-def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=100,Eqm_only=False):
+def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=25,Eqm_only=False):
     """
     Performs natural parameter continuation on system of ODEs
 
@@ -163,18 +168,16 @@ def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=100,Eqm_only=False):
         raise ValueError("p0 and pend must be np.ndarray or float type")
     
     ps = np.linspace(p0,pend,n).transpose()
-    x = np.tile(np.nan,(np.size(x_T0),n))
-
-
     if Eqm_only:
         x0 = x_T0
+        x = np.tile(np.nan,(np.size(x_T0),n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
             sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
             x[:,i] = sol
             x0=sol
     else:
+        x = np.tile(np.nan,(np.size(x_T0)-1,n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
-            #sol = opt.fsolve(lambda x: ode(x,np.nan,p),x_T0)
             sol,T0 = shoot_solve(ode,p,x_T0,delta_max)
             x[:,i] = sol
             x_T0 = np.append(sol,T0)      

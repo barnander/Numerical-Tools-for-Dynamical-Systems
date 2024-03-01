@@ -2,6 +2,7 @@
 import numpy as np
 import solvers
 import matplotlib.pyplot as plt
+import ODEs
 #%% define function
 def LK_model(x,t,p):
     dx = x[0]*(1-x[0])-(p[0]*x[0]*x[1])/(p[2]+x[0])
@@ -65,4 +66,9 @@ x_LC,t_LC = solvers.shoot_solve(LK_model,ode_params,np.array([0.1,0.1,22]),phase
 # %%
 x,t = solvers.solve_to(LK_model,ode_params,x_LC,0,t_LC,delta_max)
 
+# %%
+ode_params = np.array([1])
+
+x_LC,t_LC = solvers.shoot_solve(ODEs.Pitchfork_Super,ode_params,np.array([0.7,1]), delta_max)
+x,t = solvers.solve_to(ODEs.Pitchfork_Super,ode_params,x_LC,0,t_LC,delta_max)
 # %%
