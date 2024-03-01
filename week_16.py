@@ -5,6 +5,7 @@ from scipy import optimize as opt
 from math import nan
 import solvers
 import ODEs
+from ipywidgets import interact
 #%%
 # set up ODE
 
@@ -74,14 +75,15 @@ plt.plot(betas[1][:],r)
 # %% 3d plot of x,y on LC/eqm against beta
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
-
 ax.scatter(x[0, :], x[1, :], betas[1,:])
+plt.show()
 # %% do full fixed point/limit cycle surface
 n = 25
-LC_points = np.array([])
+LC_points = []
 for i,x0 in enumerate([x[:,i] for i in range(n)]):
     sol,_ = solvers.solve_to(LK_model,betas[:,i],x0,0,25,1e-3)
-    LC_points = np.append(LC_points,np.array([sol]))
+    LC_points.append(sol)
+    print(LC_points)
     print(i)
 ax.scatter(LC_points[0, :], LC_points[1, :], betas[1,:])
 

@@ -57,3 +57,8 @@ def Hopf_Super(x,t,p):
     dy = -x[0] + p*x[1] - x[0]**2 * x[1]
     deriv = np.append(dx,dy)
     return deriv
+
+def LK_model(x,t,p):
+    dx = x[0]*(1-x[0])-(p[0]*x[0]*x[1])/(p[2]+x[0])
+    dy = p[1]*x[1]*(1-(x[1]/x[0]))
+    return np.array([dx,dy])
