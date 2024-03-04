@@ -158,14 +158,13 @@ def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=25,Eqm_only=False):
     """
     #check that p0 and pend are the same type, length and that only one parameter changes:
     assert type(pend) == type(p0), "pend and p0 must be the same type"
-    
     if type(p0) == np.ndarray:
         assert len(p0) == len(pend), "p0 and pend should have the same length"
         assert ((pend-p0)==0).sum() == len(p0)-1, "natural_p_cont only supports variation in one parameter"
-    elif type(p0) == float:
+    elif type(p0) == float or type(p0) == int:
         p0,pend = np.array([p0]),np.array([pend])
-    else:
-        raise ValueError("p0 and pend must be np.ndarray or float type")
+    else :
+        raise ValueError("p0 and pend must be np.ndarray, float or int type")
     
     ps = np.linspace(p0,pend,n).transpose()
     if Eqm_only:

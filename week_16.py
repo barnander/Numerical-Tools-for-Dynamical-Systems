@@ -18,6 +18,7 @@ def Hopf_normal(x,t,p):
 
 #%% natural parameter continuation
 #set up beta params
+"""
 p0,pend,n = 5,0,100 
 x0 = np.array([2,2])
 betas = np.linspace(p0,pend,n)
@@ -49,7 +50,7 @@ betas,x = solvers.natural_p_cont(ode,p0,pend,x0)
 plt.plot(betas[0],x[0])
 # %%
 ode(x0,np.nan,p0)
-
+"""
 # %%
 def LK_model(x,t,p):
     dx = x[0]*(1-x[0])-(p[0]*x[0]*x[1])/(p[2]+x[0])
@@ -79,13 +80,18 @@ ax.scatter(x[0, :], x[1, :], betas[1,:])
 plt.show()
 # %% do full fixed point/limit cycle surface
 n = 25
-LC_points = []
+LC_points = x[:,0][None,:]
+betas_augmented = np.array([betas[:,0]])
 for i,x0 in enumerate([x[:,i] for i in range(n)]):
     sol,_ = solvers.solve_to(LK_model,betas[:,i],x0,0,25,1e-3)
-    LC_points.append(sol)
-    print(LC_points)
+    _,len_sol = sol.shape
+    LC_points = np.concatenate((LC_points,np.transpose(sol)))
+    betas_augmented = np.concatenate((betas_augmented,np.tile(betas[:,i],(len_sol,1))))
     print(i)
-ax.scatter(LC_points[0, :], LC_points[1, :], betas[1,:])
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(LC_points[:, 0], LC_points[:, 1], betas_augmented[:,1])
+plt.show()
 
 
 # %%
