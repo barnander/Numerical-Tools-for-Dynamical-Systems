@@ -6,12 +6,13 @@ import scipy.optimize as opt
 def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
-    to the specified endpoint (t_f) 
-
+    to the specified endpoint.
     Parameters:
         f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
-        ICs (dict): initial conditions 't' key points to initial t, 'x' key points to an np array of initial values in the state space
-        t_f (float): end time
+        p (np array): parameters of system of equations
+        x0 (np array): initial conditions for the system
+        t0 (float): initial time
+        t_f (float): final time
         delta_max (float): max step size
         solver (string): solver used
     Returns:
@@ -19,7 +20,7 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
         t (np array): value of time at every computed x
 
     """
-    f = wrap_f(f_gen,p)
+    f = lambda x,t: f_gen(x,t,p)
     #choose one-step solver
 
     if solver == 'Euler':
@@ -54,31 +55,33 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
 
 
 
-def wrap_f(f_gen,p):
-    """
-    Hard encodes ode parameter constants to the function
+# def wrap_f(f_gen,p):
+#     """
+#     Hard encodes ode parameter constants to the function f_gen.
+#     Parameters:
+#         f_gen (function): function determining system in terms of x, t, and p
+#         p (np.array): constant parameters of system used for numerical integration   
+#     Returns:
+#         f (function): function determining system in terms of x and t (p are hard encoded)
+#     """
+#     def f(x,t):
+#         return f_gen(x,t,p)
+#     return f
 
-    Parameters:
-        f_gen (function): function determining system in terms of x, t, and p
-        p (np.array): constant parameters of system used for numerical integration   
-    Returns:
-        f (function): function determining system in terms of x and t (p are hard encoded)
-    """
-    def f(x,t):
-        return f_gen(x,t,p)
-    return(f)
 
 #one step solver functions
 def euler_step(f,x_n,t_n,h):
     """
     Computes one step of numerical integration using Euler method
-
     Parameters:
         f (function): function determining system in terms of x and t
         ode_state (dict): contains current values of space variables (key = 'x_n') and time (key = 't_n')
+        x_n (np array): current values of space variables
+        t_n (float): current value of time
         h (float): size of euler step
     Returns:
-        ode_state (dict): updated state of variables after euler step
+        x_n_plus_1 (np array): updated state of variables after euler step
+        t_n_plus_1 (float): updated value of time after euler step
     """
     x_n_plus_1 = x_n + h*f(x_n,t_n)
     return x_n_plus_1,t_n+h
@@ -89,11 +92,13 @@ def rk4_step(f,x_n,t_n,h):
 
     Parameters:
         f (function): function determining system in terms of x and t
-        ode_state (dict): contains current values of space variables (key = 'x_n') and time (key = 't_n')
+        x_n (np array): current values of space variables
+        t_n (float): current value of time
         h (float): size of RK4 step
     Returns:
-        ode_state (dict): updated state of variables after RK4 order step
-    """
+        x_n_plus_1 (np array): updated state of variables after RK4 step
+        t_n_plus_1 (float): updated value of time after RK4 step
+        """
     k1 = f(x_n,t_n)
     k2 = f(x_n + h*k1/2,t_n + h/2)
     k3 = f(x_n + h*k2/2,t_n + h/2)
@@ -118,12 +123,15 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
         f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
         p (np array): parameters of system of equations
         init_guess (np array): initial guess for a point on the LC [0:-1], and for the period T [-1]
-        conds (function): definition of phase condition when LC=True, or definition of BCs and phase condition when LC = False
         delta_max (float): max step size
-        solver (string): solver used in integrator
-        LC (boolean): if True, solving for a limit cycle
+        solver (string): solver used
+        phase_cond (function): function of x and t that describes the phase condition of the LC
+                                (if the value is set to False, the phase condition is set to zero velocity in the first state variable at time t = 0)
+    Returns:
+        x_T0_solved (np array): array of solved initial conditions to the Limit Cycle and period
     """
     if not phase_cond:
+        #define default phase condition
         def pc(x,t,p):
             return f_gen(x,0,p)[0]
     else:
@@ -133,27 +141,37 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
     def g(x_T0):
         """
         Parameters:
-            x_T0 (np array): array of initial conditions and time 
+            x_T0 (np array): array of initial conditions and time
+        Returns:
+            root_solve (np array): array of residuals of the root finding problem
         """
         x0,T = x_T0[:-1],x_T0[-1]
         x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
         xf = x[:,-1]
         BC = xf-x0
         PC = pc(x0,T,p)
-        return np.append(BC,PC)
+        root_solve = np.append(BC,PC)
+        return root_solve
 
     
-    #run scipy newton root-finder on func_solve
-    x_T0_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #match rootfinder tol to integrator tol
-
+    #run scipy newton root-finder on g with initial guess
+    x_T0_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #make sure rootfinder tol is higher than integrator tol to avoid numerical issues
     return x_T0_solved[:-1], x_T0_solved[-1]
 
-
-
-def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=25,Eqm_only=False):
+def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
     """
     Performs natural parameter continuation on system of ODEs
-
+    Parameters:
+        ode (function): function of x (np array), t (float), and p (np array, integer or float) describing system of odes
+        p0 (np array): initial parameter value(s)
+        pend (np array): final parameter value(s)
+        x_T0 (np array): initial guess for the system (include initial period guess for LCs as last element of the array)
+        delta_max (float): max step size
+        n (int): number of steps in the parameter continuation
+        LC  (bool): if False, only equilibrium solutions are computed (not Limit Cycles)
+    Returns: 
+        ps (np array): array of parameter values
+        x (np array): array of equilibrium points or points on the limit cycle (and period for LCs) for each parameter value
     
     """
     #check that p0 and pend are the same type, length and that only one parameter changes:
@@ -164,29 +182,42 @@ def natural_p_cont(ode,p0,pend,x_T0,delta_max = 1e-3,n=25,Eqm_only=False):
     elif type(p0) == float or type(p0) == int:
         p0,pend = np.array([p0]),np.array([pend])
     else :
-        raise ValueError("p0 and pend must be np.ndarray, float or int type")
-    
+        raise ValueError("p0 and pend must be np.ndarray, float, or int type")
+
+   #initialise parameter array 
     ps = np.linspace(p0,pend,n).transpose()
-    if Eqm_only:
+    if LC:
+        x = np.tile(np.nan,(np.size(x_T0)-1,n))
+        for i,p in enumerate([ps[:,i] for i in range(n)]):
+            sol,T0 = shoot_solve(ode,p,x_T0,delta_max)
+            #update initial guess for next iteration
+            x_T0 = np.append(sol,T0)    
+            x[:,i] = x_T0
+       
+    else:
         x0 = x_T0
         x = np.tile(np.nan,(np.size(x_T0),n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
             sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
             x[:,i] = sol
             x0=sol
-    else:
-        x = np.tile(np.nan,(np.size(x_T0)-1,n))
-        for i,p in enumerate([ps[:,i] for i in range(n)]):
-            sol,T0 = shoot_solve(ode,p,x_T0,delta_max)
-            x[:,i] = sol
-            x_T0 = np.append(sol,T0)      
-    
+
     return ps,x
 
+def secant_step(vi_minus1, vi, LC = False):
+    #define pseudo-arclength equation as a function
+    def pseudo_arc(vi_minus1, vi): 
+        delta = vi - vi_minus1
+        v_pred = vi + delta
+        return np.dot(vi_plus1 - v_pred, delta)
+    v2_sol = opt.fsolve(lambda vi_plus1:)
 
-def secant_meth(ode,v0,v1,pend, max_it = 1e4):
-    vi_minus_1 = v0
-    vi = v1
+
+def secant_meth(ode,x0,p0, p_ind,max_it = 1e4,innit_h=1e-3):
+    
+    
+    del_p = np.zeros(len(p0))
+    
     for i in range(max_it):
         secant = vi - vi_minus_1
         v_guess = vi + secant
@@ -195,3 +226,5 @@ def secant_meth(ode,v0,v1,pend, max_it = 1e4):
 
 
 
+
+# %%
