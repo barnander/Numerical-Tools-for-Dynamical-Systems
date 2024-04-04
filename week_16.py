@@ -66,7 +66,10 @@ pend = np.array([a,bend,d])
 x_T0 = np.array([0.3,0.25,20])
 delta_max = 1e-3
 
-betas,x = solvers.natural_p_cont(LK_model,p0,pend,x_T0,delta_max)
+#betas,x = solvers.natural_p_cont(LK_model,p0,pend,x_T0,delta_max)
+betas,x = solvers.pseudo_arc(LK_model,x0,p0,pend,p_ind)
+#%%
+betas,x = pseudo_arc(ode,x0,p0,pend,p_ind)
 # %% plot distance from equilibrium against p
 eqm =np.tile(0.27015621,(2,25))
 
@@ -88,10 +91,24 @@ for i,x0 in enumerate([x[:,i] for i in range(n)]):
     LC_points = np.concatenate((LC_points,np.transpose(sol)))
     betas_augmented = np.concatenate((betas_augmented,np.tile(betas[:,i],(len_sol,1))))
     print(i)
+#%%
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 ax.scatter(LC_points[:, 0], LC_points[:, 1], betas_augmented[:,1])
 plt.show()
 
 
+
+# %% Surface plot
+fig = plt.figure(figsize=(10, 7))
+ax = fig.add_subplot(111, projection='3d')
+surf = ax.plot_surface(LC_points[:, 0], LC_points[:, 1], betas_augmented[:,1], cmap='viridis', edgecolor='none')
+ax.set_title('Surface Plot')
+ax.set_xlabel('X axis')
+ax.set_ylabel('Y axis')
+ax.set_zlabel('Z axis')
+
+# Show the plot
+plt.colorbar(surf)
+plt.show()
 # %%

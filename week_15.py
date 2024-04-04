@@ -69,6 +69,6 @@ x,t = solvers.solve_to(LK_model,ode_params,x_LC,0,t_LC,delta_max)
 # %%
 ode_params = np.array([1])
 
-x_LC,t_LC = solvers.shoot_solve(ODEs.Pitchfork_Super,ode_params,np.array([0.7,1]),phase_cond, delta_max)
+x_LC,t_LC = solvers.shoot_solve(ODEs.Pitchfork_Super,ode_params,np.array([0.7,1]),delta_max,phase_cond=None)
 x,t = solvers.solve_to(ODEs.Pitchfork_Super,ode_params,x_LC,0,t_LC,delta_max)
 # %%

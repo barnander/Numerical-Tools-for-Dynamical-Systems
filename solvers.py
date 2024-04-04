@@ -9,7 +9,7 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     to the specified endpoint.
     Parameters:
         f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
-        p (np array): parameters of system of equations
+        p (np array, float or int): parameters of system of equations
         x0 (np array): initial conditions for the system
         t0 (float): initial time
         t_f (float): final time
@@ -20,9 +20,10 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
         t (np array): value of time at every computed x
 
     """
+    p,_ = param_assert(p)
+
     f = lambda x,t: f_gen(x,t,p)
     #choose one-step solver
-
     if solver == 'Euler':
         solve_step = euler_step
     elif solver == 'RK4':
@@ -55,18 +56,29 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
 
 
 
-# def wrap_f(f_gen,p):
-#     """
-#     Hard encodes ode parameter constants to the function f_gen.
-#     Parameters:
-#         f_gen (function): function determining system in terms of x, t, and p
-#         p (np.array): constant parameters of system used for numerical integration   
-#     Returns:
-#         f (function): function determining system in terms of x and t (p are hard encoded)
-#     """
-#     def f(x,t):
-#         return f_gen(x,t,p)
-#     return f
+def param_assert(p0, pend=None):
+    """
+    Asserts that the parameters are the same type as each other and are either floats, integers, or numpy arrays.
+    Converts single float or int to a one-element numpy array for consistency.
+    Parameters:
+        p0 (float, int, or np.array): Initial parameter(s) of the system of equations.
+        pend (float, int, or np.array, optional): End parameter(s) of the system of equations. Defaults to None.
+    Returns:
+        np.array: A numpy array of p0.
+        np.array: A numpy array of pend.
+    """
+    # Check if p0 is a float or an int, and if so, convert to a numpy array with a single element
+    if isinstance(p0, (float, int)):
+        p0 = np.array([p0])
+        pend = np.array([pend]) if pend is not None else None
+    elif isinstance(p0, np.ndarray):
+        # If p0 is an array, ensure pend is also an array and has the same shape
+        assert pend is None or isinstance(pend, np.ndarray), "system parameters must be np.ndarray, float, or int type"
+        assert pend is None or p0.shape == pend.shape, "p0 and pend should have the same shape"
+    else:
+        raise ValueError("system parameters must be np.ndarray, float, or int type")
+    return p0, pend
+
 
 
 #one step solver functions
@@ -106,15 +118,6 @@ def rk4_step(f,x_n,t_n,h):
     x_n_plus_1 = x_n + h/6*(k1+2*k2+2*k3+k4)
     return x_n_plus_1,t_n + h
 
-# def finite_dif(f_x,f_x_plus_h,h):
-#     dif = (f_x_plus_h-f_x)/h
-#     return dif
-
-# def newton_meth(f,dif,x_n):
-#     x_n_plus_1 = x_n - f/dif
-#     return x_n_plus_1
-
-
 
 def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
     """
@@ -130,6 +133,7 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
     Returns:
         x_T0_solved (np array): array of solved initial conditions to the Limit Cycle and period
     """
+    p,_ = param_assert(p)
     if not phase_cond:
         #define default phase condition
         def pc(x,t,p):
@@ -146,6 +150,7 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
             root_solve (np array): array of residuals of the root finding problem
         """
         x0,T = x_T0[:-1],x_T0[-1]
+        print(x0)
         x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
         xf = x[:,-1]
         BC = xf-x0
@@ -175,55 +180,79 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
     
     """
     #check that p0 and pend are the same type, length and that only one parameter changes:
-    assert type(pend) == type(p0), "pend and p0 must be the same type"
-    if type(p0) == np.ndarray:
-        assert len(p0) == len(pend), "p0 and pend should have the same length"
-        assert ((pend-p0)==0).sum() == len(p0)-1, "natural_p_cont only supports variation in one parameter"
-    elif type(p0) == float or type(p0) == int:
-        p0,pend = np.array([p0]),np.array([pend])
-    else :
-        raise ValueError("p0 and pend must be np.ndarray, float, or int type")
-
+    p0,pend = param_assert(p0,pend)
    #initialise parameter array 
     ps = np.linspace(p0,pend,n).transpose()
     if LC:
-        x = np.tile(np.nan,(np.size(x_T0)-1,n))
+        x = np.tile(np.nan,(np.size(x_T0+1),n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
+            #use shooting method to find LCs and equilibrium points.
             sol,T0 = shoot_solve(ode,p,x_T0,delta_max)
             #update initial guess for next iteration
             x_T0 = np.append(sol,T0)    
-            x[:,i] = x_T0
-       
+            x[:,i] = sol     
     else:
         x0 = x_T0
         x = np.tile(np.nan,(np.size(x_T0),n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
+            #use scipy root solver to find equilibrium points
             sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
             x[:,i] = sol
             x0=sol
-
     return ps,x
 
-def secant_step(vi_minus1, vi, LC = False):
-    #define pseudo-arclength equation as a function
-    def pseudo_arc(vi_minus1, vi): 
-        delta = vi - vi_minus1
-        v_pred = vi + delta
-        return np.dot(vi_plus1 - v_pred, delta)
-    v2_sol = opt.fsolve(lambda vi_plus1:)
+def pseudo_arc_cond(vi_minus1, vi, vi_plus1): 
+    delta = vi - vi_minus1
+    v_pred = vi + delta
+    return np.dot(vi_plus1 - v_pred, delta)
 
-
-def secant_meth(ode,x0,p0, p_ind,max_it = 1e4,innit_h=1e-3):
+def pseudo_arc_step(ode,vi_minus1, vi, LC = False):
+    #the first value in v arrays (augmented state vector) is the parameter value and the last value is the period
     
+    #TODO make it work with multiple parameters and with LC finder
+
+    #set up function with ode and pseudo-arclength condition
+    ode_solve = lambda vi_plus1: np.append(ode(vi_plus1[1:],np.nan,vi_plus1[0]),pseudo_arc_cond(vi_minus1, vi, vi_plus1))
     
-    del_p = np.zeros(len(p0))
-    
-    for i in range(max_it):
-        secant = vi - vi_minus_1
-        v_guess = vi + secant
-        
+    #find vi_plus1 using fsolve
+    v_sol = opt.fsolve(ode_solve, vi)
+    return v_sol
 
 
+
+def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
+    p0,pend = param_assert(p0,pend)
+    assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
+
+    #find out wether we increase or decrease the parameter.
+    if type(p0) == np.ndarray:
+        direction = np.sign(pend[p_ind]-p0[p_ind])
+    else:
+        direction = np.sign(pend-p0)
+    #initialise v0 array
+    v0 = np.append(p0,x_T0)
+
+    #do a step of natural parameter continuation to find v1
+    p1 = p0 + direction * innit_h #making sure to take a step in the direction of pend
+    x1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
+    v1 = np.append(p1,x1)
+    
+    #initialise array of solutions
+    vs = np.tile(np.nan,(np.size(v0),int(max_it)))
+    vs[:,0] = v0
+    vs[:,1] = v1
+    for i in range(int(max_it)):
+        #take a step of pseudo-arclength continuation and add to solutions array
+        v2 = pseudo_arc_step(ode,v0,v1)
+        vs[:,i+2] = v2
+        #check if we have reached the end of the continuation
+        if direction * v2[0] > direction * pend[p_ind]:
+            print(f"Reached end of continuation after {i} iterations")
+            return vs[:,:i+3]
+        v0 = v1
+        v1 = v2
+    print("Max iterations reached")
+    return vs
 
 
 
