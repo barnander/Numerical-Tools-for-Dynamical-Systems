@@ -58,18 +58,17 @@ def LK_model(x,t,p):
     return np.array([dx,dy])
 a = 1
 d=0.1
-b0=0.15
-bend =0.35
+bend=0.15
+b0 =0.35
 
 p0 = np.array([a,b0,d])
 pend = np.array([a,bend,d])
-x_T0 = np.array([0.3,0.25,20])
+x_T0 = np.array([0.3,0.25])
 delta_max = 1e-3
 
-#betas,x = solvers.natural_p_cont(LK_model,p0,pend,x_T0,delta_max)
-betas,x = solvers.pseudo_arc(LK_model,x0,p0,pend,p_ind)
-#%%
-betas,x = pseudo_arc(ode,x0,p0,pend,p_ind)
+betas,x = solvers.natural_p_cont(LK_model,p0,pend,x_T0,delta_max,LC = False)
+#betas,x = solvers.pseudo_arc(LK_model,x_T0,p0,pend,1)
+
 # %% plot distance from equilibrium against p
 eqm =np.tile(0.27015621,(2,25))
 

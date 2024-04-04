@@ -32,7 +32,6 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
         raise ValueError("Unsupported solver: {}".format(solver))
     
     total_time = t_f - t0
-
     #make function robust to too small time scales
     if total_time < 2*delta_max:
         print("The duration of the integration is shorther than delta max")
@@ -150,7 +149,6 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
             root_solve (np array): array of residuals of the root finding problem
         """
         x0,T = x_T0[:-1],x_T0[-1]
-        print(x0)
         x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
         xf = x[:,-1]
         BC = xf-x0
@@ -181,32 +179,52 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
     """
     #check that p0 and pend are the same type, length and that only one parameter changes:
     p0,pend = param_assert(p0,pend)
-   #initialise parameter array 
+   #initialise parameter array and solution array
     ps = np.linspace(p0,pend,n).transpose()
+    x_T = np.tile(np.nan,(np.size(x_T0),n))
+    #define root finder (depending on wether we're looking for LCs or not)
     if LC:
-        x = np.tile(np.nan,(np.size(x_T0+1),n))
+        solve_func = lambda x_T,p: shoot_solve(ode,p,x_T,delta_max)
+    else:
+        solve_func = lambda x_T,p: opt.fsolve(ode,x_T,args =(np.nan,p))
+    #iterate through parameters
+    for i,p in enumerate(ps):
+        print(i)
+        #add result to results array
+        x_T[:,i] = x_T0
+        #find equilibria/LCs
+        x_Ti = solve_func(x_T0,p)
+        #update initial guess for next iteration
+        x_T0 = x_Ti
+    #add finall value 
+    x_T[:,-1] = x_Ti
+    return x_T,ps
+    """
+    if LC:
+        x = np.tile(np.nan,(np.size(x_T0),n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
             #use shooting method to find LCs and equilibrium points.
-            sol,T0 = shoot_solve(ode,p,x_T0,delta_max)
+            xi,Ti = shoot_solve(ode,p,x_T0,delta_max)
             #update initial guess for next iteration
-            x_T0 = np.append(sol,T0)    
-            x[:,i] = sol     
+            x_T0 = np.append(xi,Ti)   
+            #add new value to array
+            x[:,i] = x_T0
     else:
-        x0 = x_T0
         x = np.tile(np.nan,(np.size(x_T0),n))
         for i,p in enumerate([ps[:,i] for i in range(n)]):
             #use scipy root solver to find equilibrium points
-            sol = opt.fsolve(lambda x: ode(x,np.nan,p),x0)
-            x[:,i] = sol
-            x0=sol
+            xi = opt.fsolve(lambda x: ode(x,np.nan,p),x_T0)
+            x[:,i] = xi
+            x_T0= xi
     return ps,x
-
+"""
 def pseudo_arc_cond(vi_minus1, vi, vi_plus1): 
     delta = vi - vi_minus1
     v_pred = vi + delta
     return np.dot(vi_plus1 - v_pred, delta)
 
 def pseudo_arc_step(ode,vi_minus1, vi, LC = False):
+    #TODO: include in same func as natural param cont
     #the first value in v arrays (augmented state vector) is the parameter value and the last value is the period
     
     #TODO make it work with multiple parameters and with LC finder
@@ -234,6 +252,11 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
 
     #do a step of natural parameter continuation to find v1
     p1 = p0 + direction * innit_h #making sure to take a step in the direction of pend
+    print(p1)
+    print(x_T0)
+    print(ode(x_T0,np.nan,p1))
+    #TODO remove debugging code
+
     x1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
     v1 = np.append(p1,x1)
     
