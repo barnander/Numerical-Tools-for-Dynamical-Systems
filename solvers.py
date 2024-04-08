@@ -263,6 +263,7 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
 
 def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     p0,pend = param_assert(p0,pend)
+    print(p0)
     assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
 
     #find out wether we increase or decrease the parameter.
@@ -271,7 +272,9 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     #do a step of natural parameter continuation to find v1
     p1 = p0.copy()
     p1[p_ind] = p0[p_ind] + direction * innit_h #making sure to take a step in the direction of pend
+    print(p0[p_ind] + direction * innit_h)
     x_T1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
+    print(p0,p1)
     #initialise array of solutions
     x_T = np.tile(np.nan,(np.size(x_T0),int(max_it)+2))
     ps = np.tile(np.nan,(np.size(p0),int(max_it)+2))
@@ -287,7 +290,6 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
         ps[:,i+2] = p2
 
         #check if we have reached the end of the continuation
-        print(direction * p2[p_ind], direction * pend[p_ind])
         if direction * p2[p_ind] > direction * pend[p_ind]:
             print(f"Reached end of continuation after {i} iterations")
             return x_T[:,:i+3], ps[:,:i+3]
