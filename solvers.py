@@ -68,8 +68,8 @@ def param_assert(p0, pend=None):
     """
     # Check if p0 is a float or an int, and if so, convert to a numpy array with a single element
     if isinstance(p0, (float, int)):
-        p0 = np.array([p0])
-        pend = np.array([pend]) if pend is not None else None
+        p0 = np.array([p0], dtype = float)
+        pend = np.array([pend], dtype = float) if pend is not None else None
     elif isinstance(p0, np.ndarray):
         # If p0 is an array, ensure pend is also an array and has the same shape
         assert pend is None or isinstance(pend, np.ndarray), "system parameters must be np.ndarray, float, or int type"
@@ -161,7 +161,9 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
     x_T0_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #make sure rootfinder tol is higher than integrator tol to avoid numerical issues
     return x_T0_solved[:-1], x_T0_solved[-1]
 
-def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
+
+
+def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 100, LC = True):
     """
     Performs natural parameter continuation on system of ODEs
     Parameters:
@@ -174,14 +176,15 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
         LC  (bool): if False, only equilibrium solutions are computed (not Limit Cycles)
     Returns: 
         ps (np array): array of parameter values
-        x (np array): array of equilibrium points or points on the limit cycle (and period for LCs) for each parameter value
+        x_T (np array): array of equilibrium points or points on the limit cycle (and period for LCs) for each parameter value
     
     """
     #check that p0 and pend are the same type, length and that only one parameter changes:
     p0,pend = param_assert(p0,pend)
-   #initialise parameter array and solution array
-    ps = np.linspace(p0,pend,n).transpose()
+    #initialise parameter array and solution array
+    ps = np.linspace(p0,pend,n)
     x_T = np.tile(np.nan,(np.size(x_T0),n))
+
     #define root finder (depending on wether we're looking for LCs or not)
     if LC:
         solve_func = lambda x_T,p: shoot_solve(ode,p,x_T,delta_max)
@@ -189,16 +192,15 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
         solve_func = lambda x_T,p: opt.fsolve(ode,x_T,args =(np.nan,p))
     #iterate through parameters
     for i,p in enumerate(ps):
-        print(i)
-        #add result to results array
-        x_T[:,i] = x_T0
         #find equilibria/LCs
         x_Ti = solve_func(x_T0,p)
+        #add result to results array
+        x_T[:,i] = x_Ti
         #update initial guess for next iteration
         x_T0 = x_Ti
     #add finall value 
     x_T[:,-1] = x_Ti
-    return x_T,ps
+    return x_T,ps.transpose()
     """
     if LC:
         x = np.tile(np.nan,(np.size(x_T0),n))
@@ -218,23 +220,44 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 25, LC = True):
             x_T0= xi
     return ps,x
 """
-def pseudo_arc_cond(vi_minus1, vi, vi_plus1): 
+def pseudo_arc_cond(v2,v_pred): 
     delta = vi - vi_minus1
     v_pred = vi + delta
     return np.dot(vi_plus1 - v_pred, delta)
 
-def pseudo_arc_step(ode,vi_minus1, vi, LC = False):
-    #TODO: include in same func as natural param cont
-    #the first value in v arrays (augmented state vector) is the parameter value and the last value is the period
-    
+
+
+def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
+    #TODO: include in same func as natural param cont    
     #TODO make it work with multiple parameters and with LC finder
 
-    #set up function with ode and pseudo-arclength condition
-    ode_solve = lambda vi_plus1: np.append(ode(vi_plus1[1:],np.nan,vi_plus1[0]),pseudo_arc_cond(vi_minus1, vi, vi_plus1))
+    #form augmented state vectors
+    v0 = np.append(p0[p_ind],x_T0)
+    v1 = np.append(p1[p_ind],x_T1)
+
+    #find the delta and predict v2
+    delta = v1 - v0
+    v_pred = v1 + delta
+    #define function to solve
+    if LC:
+        basil = 5
+    else:
+        def root_solve(v2):
+            p2 = p1.copy()
+            p2[p_ind] = v2[0]
+            pseudo_cond = np.dot(v2 - v_pred, delta)
+            eqm_cond = ode(v2[1:], np.nan, p2)
+            residuals = np.append(pseudo_cond,eqm_cond)
+            return residuals
     
-    #find vi_plus1 using fsolve
-    v_sol = opt.fsolve(ode_solve, vi)
-    return v_sol
+    #find v2 using fsolve
+    v2 = opt.fsolve(root_solve,v1)
+
+    #reform variable and parameter arrays
+    x_T2 = v2[1:]
+    p2 = p1.copy()
+    p2[p_ind] = v2[0]
+    return x_T2,p2
 
 
 
@@ -243,39 +266,38 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
 
     #find out wether we increase or decrease the parameter.
-    if type(p0) == np.ndarray:
-        direction = np.sign(pend[p_ind]-p0[p_ind])
-    else:
-        direction = np.sign(pend-p0)
-    #initialise v0 array
-    v0 = np.append(p0,x_T0)
-
-    #do a step of natural parameter continuation to find v1
-    p1 = p0 + direction * innit_h #making sure to take a step in the direction of pend
-    print(p1)
-    print(x_T0)
-    print(ode(x_T0,np.nan,p1))
-    #TODO remove debugging code
-
-    x1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
-    v1 = np.append(p1,x1)
+    direction = np.sign(pend[p_ind]-p0[p_ind])
     
+    #do a step of natural parameter continuation to find v1
+    p1 = p0.copy()
+    p1[p_ind] = p0[p_ind] + direction * innit_h #making sure to take a step in the direction of pend
+    x_T1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
     #initialise array of solutions
-    vs = np.tile(np.nan,(np.size(v0),int(max_it)))
-    vs[:,0] = v0
-    vs[:,1] = v1
+    x_T = np.tile(np.nan,(np.size(x_T0),int(max_it)+2))
+    ps = np.tile(np.nan,(np.size(p0),int(max_it)+2))
+    #and add values for v0 and v1
+    x_T[:,0] = x_T0
+    x_T[:,1] = x_T1
+    ps[:,0] = p0
+    ps[:,1] = p1
     for i in range(int(max_it)):
         #take a step of pseudo-arclength continuation and add to solutions array
-        v2 = pseudo_arc_step(ode,v0,v1)
-        vs[:,i+2] = v2
+        x_T2,p2 = pseudo_arc_step(ode,x_T0,p0,x_T1,p1,p_ind=p_ind)
+        x_T[:,i+2] = x_T2
+        ps[:,i+2] = p2
+
         #check if we have reached the end of the continuation
-        if direction * v2[0] > direction * pend[p_ind]:
+        print(direction * p2[p_ind], direction * pend[p_ind])
+        if direction * p2[p_ind] > direction * pend[p_ind]:
             print(f"Reached end of continuation after {i} iterations")
-            return vs[:,:i+3]
-        v0 = v1
-        v1 = v2
+            return x_T[:,:i+3], ps[:,:i+3]
+        #update values for v0 and v1 for next iteration
+        x_T0 = x_T1
+        x_T1 = x_T2
+        p0 = p1
+        p1 = p2
     print("Max iterations reached")
-    return vs
+    return x_T,ps
 
 
 
