@@ -34,5 +34,20 @@ class TestAddFunction(unittest.TestCase):
         anal_y = math.cos(math.sqrt(2) * t_f)
         self.assertAlmostEqual(x[0,-1],anal_x)
         self.assertAlmostEqual(x[1,-1],anal_y)
+    
+    def test_finite_diff(self):
+        #test Poisson solver for linear source term
+        a = 1
+        b = 10
+        alpha = 48
+        beta = 1
+        bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
+        bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
+        D = 2
+        N = 1000
+        f = lambda x: x
+        analytical = lambda x: (-a**3*b + a*b**3 + 6*a*D - 6*b*D*alpha-x**3*(a-b) + x*(a**3 - b**3 + 6*D*alpha - 6*D)) / (6*D*(a-b))
+        u, x = solvers.Poisson_Solve(bc_left,bc_right,N,f,D)
+        self.assertAlmostEqual(np.linalg.norm(u-analytical(x)),0)
 if __name__ == '__main__':
     unittest.main()

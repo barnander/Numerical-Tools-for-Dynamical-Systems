@@ -278,8 +278,9 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     return x_T,ps
 
 class Boundary_Condition():
-    def __init__(self,type,value):
+    def __init__(self,type,x,value):
         self.type = type
+        self.x = x
         self.value = value
 
 class Grid():
@@ -290,7 +291,15 @@ class Grid():
         self.dx = (b-a)/N
         self.x = np.linspace(a,b,N+1)
 
-def Poisson_Solve(bc_left,bc_right,grid,q, solver = 'solve'):
+def construct_A_b(grid,bc_left,bc_right):
+    A = np.diag(np.ones(grid.N-2),-1) - 2*np.diag(np.ones(grid.N-1),0) + np.diag(np.ones(grid.N-2),1)
+    b = np.zeros(grid.N-1)
+    b[0] = bc_left.value
+    b[-1] = bc_right.value
+    return A,b
+
+
+def Poisson_Solve(bc_left,bc_right,N,q,D, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -302,23 +311,22 @@ def Poisson_Solve(bc_left,bc_right,grid,q, solver = 'solve'):
     Returns:
         u (np array): solution to the Poisson equation
     """
+    #form grid
+    grid = Grid(N,bc_left.x,bc_right.x)
     #form matrix A and vector b
-    A_dd = np.diag(np.ones(grid.N-1),-1) - 2*np.diag(np.ones(grid.N),0) + np.diag(np.ones(grid.N-1),1)
-    b_dd = np.zeros(grid.N-1)
-    b_dd[0] = bc_left.value
-    b_dd[-1] = bc_right.value
-    b = - b_dd - grid.dx**2 * q(grid.x[1:-1])
+    A,b = construct_A_b(grid, bc_left, bc_right)
 
     #solve linear system
     if solver == 'solve':
-        u = np.linalg.solve(A_dd,b)
+        u = np.linalg.solve(A,- b - grid.dx**2 * q(grid.x[1:-1])/D)
+    #TODO: add scipy root and Newton's method
     else:
         raise ValueError("Unsupported solver: {}".format(solver))
 
     #add boundary conditions to solution
     u = np.append(bc_left.value,u)
     u = np.append(u,bc_right.value)
-    return u
+    return u, grid.x
 
 
 
