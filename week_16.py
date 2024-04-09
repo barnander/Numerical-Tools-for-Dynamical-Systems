@@ -11,7 +11,7 @@ from ipywidgets import interact
 
 def Hopf_normal(x,t,p):
     u1,u2 = x
-    beta = p
+    beta = p[0]
     du1 = beta*u1 - u2 - u1 * (u1**2 + u2**2)
     du2 = u1 + beta*u2 - u2*(u1**2 + u2**2)
     return np.array([du1,du2])
@@ -56,18 +56,25 @@ def LK_model(x,t,p):
     dx = x[0]*(1-x[0])-(p[0]*x[0]*x[1])/(p[2]+x[0])
     dy = p[1]*x[1]*(1-(x[1]/x[0]))
     return np.array([dx,dy])
+def Alg_Cubic(x,t,p):
+    c = p[0]
+    return x**3 - x + c
 a = 1
 d=0.1
 bend=0.15
 b0 =0.35
 
-p0 = np.array([a,b0,d])
-pend = np.array([a,bend,d])
-x_T0 = np.array([0.3,0.25])
+#p0 = np.array([a,b0,d])
+#pend = np.array([a,bend,d])
+
+p0 = np.array([3.])
+pend = np.array([-1.])
+
+x_T0 = np.array([0.2])
 delta_max = 1e-3
 
-betas,x = solvers.natural_p_cont(LK_model,p0,pend,x_T0,delta_max,LC = False)
-#betas,x = solvers.pseudo_arc(LK_model,x_T0,p0,pend,1)
+#x,betas = solvers.natural_p_cont(Alg_Cubic,p0,pend,x_T0,delta_max,LC = False)
+x,ps = solvers.pseudo_arc(ODEs.Pitchfork_Super,x_T0,p0,pend,0,innit_h=10**-6)
 
 # %% plot distance from equilibrium against p
 eqm =np.tile(0.27015621,(2,25))

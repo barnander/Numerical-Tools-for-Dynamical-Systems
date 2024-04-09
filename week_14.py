@@ -8,16 +8,13 @@ import math
 import matplotlib.pyplot as plt
 import solvers
 #%% define ode and parameters
-def f(t,x):
+def f(x,t,p):
     return np.array([x[0]])
-
-x_1 = np.array([1])
-t_1 = 0
+x0 = np.array([1]) 
+t0 = 0
+t_f = 1
 h = 0.01
-t_final = 1
-initial_conds = {'x' : x_1, 't' : t_1}
-
-t,x = solvers.solve_to(f,initial_conds,t_final,h)
+x,t = solvers.solve_to(f,np.nan,x0,t0,t_f,h)
 
 # %% plot error against step size & time methods
 hs = np.logspace(-5,-1)

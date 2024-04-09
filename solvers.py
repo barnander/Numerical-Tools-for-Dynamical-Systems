@@ -118,6 +118,7 @@ def rk4_step(f,x_n,t_n,h):
     return x_n_plus_1,t_n + h
 
 
+
 def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
     """
     Finds limit cycles (LC) using  numerical shooting (potentially generalise to all BVPs later)
@@ -201,31 +202,6 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 100, LC = True):
     #add finall value 
     x_T[:,-1] = x_Ti
     return x_T,ps.transpose()
-    """
-    if LC:
-        x = np.tile(np.nan,(np.size(x_T0),n))
-        for i,p in enumerate([ps[:,i] for i in range(n)]):
-            #use shooting method to find LCs and equilibrium points.
-            xi,Ti = shoot_solve(ode,p,x_T0,delta_max)
-            #update initial guess for next iteration
-            x_T0 = np.append(xi,Ti)   
-            #add new value to array
-            x[:,i] = x_T0
-    else:
-        x = np.tile(np.nan,(np.size(x_T0),n))
-        for i,p in enumerate([ps[:,i] for i in range(n)]):
-            #use scipy root solver to find equilibrium points
-            xi = opt.fsolve(lambda x: ode(x,np.nan,p),x_T0)
-            x[:,i] = xi
-            x_T0= xi
-    return ps,x
-"""
-def pseudo_arc_cond(v2,v_pred): 
-    delta = vi - vi_minus1
-    v_pred = vi + delta
-    return np.dot(vi_plus1 - v_pred, delta)
-
-
 
 def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
     #TODO: include in same func as natural param cont    
@@ -300,6 +276,60 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
         p1 = p2
     print("Max iterations reached")
     return x_T,ps
+
+class Boundary_Condition():
+    def __init__(self,type,value):
+        self.type = type
+        self.value = value
+
+class Grid():
+    def __init__(self,N,a,b):
+        self.N = N
+        self.a = a
+        self.b = b
+        self.dx = (b-a)/N
+        self.x = np.linspace(a,b,N+1)
+
+def Poisson_Solve(bc_left,bc_right,grid,q, solver = 'solve'):
+    """
+    Solves the Poisson equation for a given grid, boundary conditions and source term.
+    Parameters:
+        bc_left (Boundary_Condition): left boundary condition
+        bc_right (Boundary_Condition): right boundary condition
+        grid (Grid): grid object of discretised space
+        q (function): source term, function of x
+        solver (string): solver used for linear system
+    Returns:
+        u (np array): solution to the Poisson equation
+    """
+    #form matrix A and vector b
+    A_dd = np.diag(np.ones(grid.N-1),-1) - 2*np.diag(np.ones(grid.N),0) + np.diag(np.ones(grid.N-1),1)
+    b_dd = np.zeros(grid.N-1)
+    b_dd[0] = bc_left.value
+    b_dd[-1] = bc_right.value
+    b = - b_dd - grid.dx**2 * q(grid.x[1:-1])
+
+    #solve linear system
+    if solver == 'solve':
+        u = np.linalg.solve(A_dd,b)
+    else:
+        raise ValueError("Unsupported solver: {}".format(solver))
+
+    #add boundary conditions to solution
+    u = np.append(bc_left.value,u)
+    u = np.append(u,bc_right.value)
+    return u
+
+
+
+
+
+
+
+
+
+
+
 
 
 
