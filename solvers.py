@@ -313,13 +313,21 @@ def Poisson_Solve(bc_left,bc_right,N,q,D, solver = 'solve'):
     """
     #form grid
     grid = Grid(N,bc_left.x,bc_right.x)
+    dx = grid.dx
     #form matrix A and vector b
     A,b = construct_A_b(grid, bc_left, bc_right)
 
     #solve linear system
     if solver == 'solve':
-        u = np.linalg.solve(A,- b - grid.dx**2 * q(grid.x[1:-1])/D)
-    #TODO: add scipy root and Newton's method
+        u = np.linalg.solve(A,- b - dx**2 * q(grid.x[1:-1])/D)
+    #TODO: add Newton's method
+    elif solver == 'root':
+        f = lambda u: A@u + b + dx**2 * q(grid.x[1:-1])/D
+        result = opt.root(f,np.zeros(grid.N-1))
+        if result.success:
+            u = result.x
+        else:
+            raise ValueError("Root solver failed")
     else:
         raise ValueError("Unsupported solver: {}".format(solver))
 
