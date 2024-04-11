@@ -283,7 +283,15 @@ class Boundary_Condition():
     def __init__(self,type,x,value):
         self.type = type
         self.x = x
-        self.value = value
+        if type == "Dirichlet":
+            self.value = (value,0,0)
+        elif type == "Neumann":
+            self.value = (0,value,0)
+        elif type == "Robin":
+            self.value = (0,) + value
+        else:
+            raise ValueError("Unsupported boundary condition type: {}".format(type))
+        
 
 class Grid():
     def __init__(self,N,a,b):
@@ -293,17 +301,45 @@ class Grid():
         self.dx = (b-a)/N
         self.x = np.linspace(a,b,N+1)
 
-def construct_A_b(grid,bc_left,bc_right):
-    A = np.diag(np.ones(grid.N-2),-1) - 2*np.diag(np.ones(grid.N-1),0) + np.diag(np.ones(grid.N-2),1)
-    b = np.zeros(grid.N-1)
-    b[0] = bc_left.value
-    b[-1] = bc_right.value
+def construct_A_b(grid, bc_left, bc_right):
+
+    N = grid.N
+    dx = grid.dx
+    #Make general tridiagonal matrix A
+    #superdiagonal
+    A_sup = np.ones(N-2) 
+    #subdiagonal
+    A_sub = np.ones(N-2)
+    #diagonal
+    A_diag = -2*np.ones(N-1)
+
+    #make general vector b
+    b = np.zeros(N-1)
+    b[0] = bc_left.value[0]
+    b[-1] = bc_right.value[0]
+
+    #add values for Neumann and Robin boundary conditions
+    if bc_left.type != "Dirichlet":
+        A_sup = np.append(2,A_sup)
+        A_sub = np.append(1,A_sub)
+        A_diag = np.append(-2 * (1 - dx * bc_left.value[2]),A_diag)
+        b = np.append(-2 * dx * bc_left.value[1],b)
+
+    if bc_right.type != "Dirichlet":
+        A_sup = np.append(A_sup,1)
+        A_sub = np.append(A_sub,2)
+        A_diag = np.append(A_diag,-2 * (1 + dx * bc_right.value[2]))
+        b = np.append(b, 2 * dx * bc_right.value[1])
+
+    #construct matrix A
+    A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+
     return A,b
 
 
 
 
-def Poisson_Solve( bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
+def Poisson_Solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -318,8 +354,21 @@ def Poisson_Solve( bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.
     #form grid
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
-    #form matrix A and vector b
+
+    # find matrix A and vector c
     A,b = construct_A_b(grid, bc_left, bc_right)
+
+    #boolean variable to define the start and end grid points for the system of equations
+    if bc_left.type == "Dirichlet":
+        u_0 = 1
+    else:
+        u_0 = None
+
+    if bc_right.type == "Dirichlet":
+        u_N = -1
+    else:
+        u_N = None
+    
 
     #find number of arguments to q
     n_args = len(inspect.signature(q).parameters)
@@ -327,11 +376,11 @@ def Poisson_Solve( bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.
     if n_args == 2:
         #solve linear system
         if solver == 'solve':
-            u = np.linalg.solve(A,- b - dx**2/D * q(grid.x[1:-1], p))
+            u = np.linalg.solve(A, -b - dx**2/D * q(grid.x[u_0:u_N], p))
         #TODO: add Newton's method
         #TODO: add Thomas algorithm for tridiagonal matrices
         elif solver == 'root':
-            f = lambda u: A@u + b + dx**2/D * q(grid.x[1:-1], p)
+            f = lambda u: A@u + b + dx**2/D * q(u,grid.x[u_0:u_N], p)
             result = opt.root(f,np.zeros(grid.N-1))
             if result.success:
                 u = result.x
@@ -349,20 +398,22 @@ def Poisson_Solve( bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.
         elif solver == 'newton':
             #initialise first guess for u
             if u_innit.any() == None:
-                u = np.zeros(len(grid.x)-2)
+                u = np.zeros(len(b))
             else:
-                u = u_innit[1:-1]
+                u = u_innit[u_0:u_N]
+
             #define Jacobian of source term
             if dq_du is None:
                 #TODO: add finite difference approximation for dq_du
                 raise ValueError("dq_du must be provided for non-linear Poisson equation")
-            J_q = np.diag(dq_du(u,grid.x[1:-1], p))
+
+            J_q = np.diag(dq_du(u,grid.x[u_0:u_N], p))
             #solve for u using Newton's method
             for i in range(max_iter):
                 print(i)
                 print(u)
                 #compute discretised residual
-                F = A@u + b + dx**2/D * q(u,grid.x[1:-1], p)
+                F = A@u + b + dx**2/D * q(u,grid.x[u_0:u_N], p)
                 #define Jacobian of the system
                 J_F = A + dx**2/D * J_q
                 #solve for correction V
@@ -374,9 +425,12 @@ def Poisson_Solve( bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.
                 if np.linalg.norm(V) < tol:
                     print(f"Newton method converged within the tolerance after {i} iterations")
                     break
-    #add boundary conditions to solution
-    u = np.append(bc_left.value,u)
-    u = np.append(u,bc_right.value)
+    
+    #add boundary conditions to solution for Dirichlet boundary conditions
+    if bc_left.type == "Dirichlet":
+        u = np.append(bc_left.value[0],u)
+    if bc_right.type == "Dirichlet":
+        u = np.append(u,bc_right.value[0])
     return u, grid.x
 
 
