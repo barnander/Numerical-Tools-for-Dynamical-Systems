@@ -299,14 +299,16 @@ def construct_A_b(grid,bc_left,bc_right):
     return A,b
 
 
-def Poisson_Solve(bc_left,bc_right,N,q,D, solver = 'solve'):
+
+
+def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = False, v = 1, dq_du = None, max_iter = 100, tol, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
         bc_left (Boundary_Condition): left boundary condition
         bc_right (Boundary_Condition): right boundary condition
-        grid (Grid): grid object of discretised space
-        q (function): source term, function of x
+        N (int): number of grid points
+        q (function): source term, function of x OR u
         solver (string): solver used for linear system
     Returns:
         u (np array): solution to the Poisson equation
@@ -317,20 +319,52 @@ def Poisson_Solve(bc_left,bc_right,N,q,D, solver = 'solve'):
     #form matrix A and vector b
     A,b = construct_A_b(grid, bc_left, bc_right)
 
-    #solve linear system
-    if solver == 'solve':
-        u = np.linalg.solve(A,- b - dx**2 * q(grid.x[1:-1])/D)
-    #TODO: add Newton's method
-    elif solver == 'root':
-        f = lambda u: A@u + b + dx**2 * q(grid.x[1:-1])/D
-        result = opt.root(f,np.zeros(grid.N-1))
-        if result.success:
-            u = result.x
+    if linear:
+        #solve linear system
+        if solver == 'solve':
+            u = np.linalg.solve(A,- b - dx**2/D * q(grid.x[1:-1]))
+        #TODO: add Newton's method
+        #TODO: add Thomas algorithm for tridiagonal matrices
+        elif solver == 'root':
+            f = lambda u: A@u + b + dx**2/D * q(grid.x[1:-1])
+            result = opt.root(f,np.zeros(grid.N-1))
+            if result.success:
+                u = result.x
+            else:
+                raise ValueError("Root solver failed")
         else:
-            raise ValueError("Root solver failed")
+            raise ValueError("Unsupported solver: {}".format(solver))
+    
+    #solve non-linear system
     else:
-        raise ValueError("Unsupported solver: {}".format(solver))
-
+        if solver == 'solve':
+            raise ValueError("'solve' solver not supported for non-linear Poisson equation")
+        elif solver == 'root':
+            raise ValueError("'root' solver not supported for non-linear Poisson equation")
+        elif solver == 'newton':
+            #initialise first guess for u
+            if not u_innit:
+                u = np.zeros(len(grid.x)-2)
+            else:
+                u = u_innit
+            #define Jacobian of source term
+            if dq_du is None:
+                #TODO: add finite difference approximation for dq_du
+                raise ValueError("dq_du must be provided for non-linear Poisson equation")
+            J_q = np.diag(dq_du(u,grid.x[1:-1]))
+            #solve for u using Newton's method
+            for i in range(max_iter):
+                #define Jacobian of the system
+                J_F = A + dx**2/D * dq_du(u_innit,grid.x[1:-1])
+                #solve for correction V
+                #TODO: add Thomas algorithm for tridiagonal matrices
+                V = np.linalg.solve(J_F,-q(u,grid.x[1:-1]))
+                #update u
+                u += V
+                #check for convergence
+                if np.linalg.norm(V) < tol:
+                    print(f"Converged after {i} iterations")
+                    break
     #add boundary conditions to solution
     u = np.append(bc_left.value,u)
     u = np.append(u,bc_right.value)
