@@ -301,7 +301,7 @@ def construct_A_b(grid,bc_left,bc_right):
 
 
 
-def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = False, v = 1, dq_du = None, max_iter = 100, tol, solver = 'solve'):
+def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -343,10 +343,10 @@ def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = False,
             raise ValueError("'root' solver not supported for non-linear Poisson equation")
         elif solver == 'newton':
             #initialise first guess for u
-            if not u_innit:
+            if u_innit.any() == None:
                 u = np.zeros(len(grid.x)-2)
             else:
-                u = u_innit
+                u = u_innit[1:-1]
             #define Jacobian of source term
             if dq_du is None:
                 #TODO: add finite difference approximation for dq_du
@@ -354,13 +354,17 @@ def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = False,
             J_q = np.diag(dq_du(u,grid.x[1:-1]))
             #solve for u using Newton's method
             for i in range(max_iter):
+                print(i)
+                print(u)
+                #compute discretised residual
+                F = A@u + b + dx**2/D * q(u,grid.x[1:-1])
                 #define Jacobian of the system
-                J_F = A + dx**2/D * dq_du(u_innit,grid.x[1:-1])
+                J_F = A + dx**2/D * J_q
                 #solve for correction V
                 #TODO: add Thomas algorithm for tridiagonal matrices
-                V = np.linalg.solve(J_F,-q(u,grid.x[1:-1]))
+                V = np.linalg.solve(J_F,-F)
                 #update u
-                u += V
+                u += v*V
                 #check for convergence
                 if np.linalg.norm(V) < tol:
                     print(f"Converged after {i} iterations")

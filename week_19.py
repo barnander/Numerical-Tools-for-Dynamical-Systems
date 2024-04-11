@@ -34,4 +34,22 @@ u_anal = analytical(x)
 plt.scatter(x,u)
 plt.plot(x,u_anal)
 plt.show()
+# %% Test non-linear solver
+a,b = 0,1
+alpha,beta = 0,0
+D = 1
+N = 100
+mu = 0.1
+q = lambda u,x : np.exp(mu * u)
+dq_du = lambda u,x : mu * np.exp(mu * u)
+innit_guess = np.ones(N+1)
+bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
+bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
+linear = False
+solver = 'newton'
+u, x = solvers.Poisson_Solve(bc_left,bc_right,N,q,D=D,linear=linear,solver=solver,u_innit=innit_guess, dq_du=dq_du)
+
+
+# %%
+plt.plot(x,u)
 # %%
