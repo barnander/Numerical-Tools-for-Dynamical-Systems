@@ -1,6 +1,7 @@
 #%% Packages
 import numpy as np
 import scipy.optimize as opt
+import inspect
 #%% Functions
 #one-step solvers wrapper
 def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
@@ -278,6 +279,7 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     return x_T,ps
 
 class Boundary_Condition():
+    #TODO: add Neumann and Robin boundary conditions
     def __init__(self,type,x,value):
         self.type = type
         self.x = x
@@ -301,7 +303,7 @@ def construct_A_b(grid,bc_left,bc_right):
 
 
 
-def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
+def Poisson_Solve( bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -319,14 +321,17 @@ def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = np.arr
     #form matrix A and vector b
     A,b = construct_A_b(grid, bc_left, bc_right)
 
-    if linear:
+    #find number of arguments to q
+    n_args = len(inspect.signature(q).parameters)
+
+    if n_args == 2:
         #solve linear system
         if solver == 'solve':
-            u = np.linalg.solve(A,- b - dx**2/D * q(grid.x[1:-1]))
+            u = np.linalg.solve(A,- b - dx**2/D * q(grid.x[1:-1], p))
         #TODO: add Newton's method
         #TODO: add Thomas algorithm for tridiagonal matrices
         elif solver == 'root':
-            f = lambda u: A@u + b + dx**2/D * q(grid.x[1:-1])
+            f = lambda u: A@u + b + dx**2/D * q(grid.x[1:-1], p)
             result = opt.root(f,np.zeros(grid.N-1))
             if result.success:
                 u = result.x
@@ -336,7 +341,7 @@ def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = np.arr
             raise ValueError("Unsupported solver: {}".format(solver))
     
     #solve non-linear system
-    else:
+    elif n_args == 3:
         if solver == 'solve':
             raise ValueError("'solve' solver not supported for non-linear Poisson equation")
         elif solver == 'root':
@@ -351,13 +356,13 @@ def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = np.arr
             if dq_du is None:
                 #TODO: add finite difference approximation for dq_du
                 raise ValueError("dq_du must be provided for non-linear Poisson equation")
-            J_q = np.diag(dq_du(u,grid.x[1:-1]))
+            J_q = np.diag(dq_du(u,grid.x[1:-1], p))
             #solve for u using Newton's method
             for i in range(max_iter):
                 print(i)
                 print(u)
                 #compute discretised residual
-                F = A@u + b + dx**2/D * q(u,grid.x[1:-1])
+                F = A@u + b + dx**2/D * q(u,grid.x[1:-1], p)
                 #define Jacobian of the system
                 J_F = A + dx**2/D * J_q
                 #solve for correction V
@@ -367,7 +372,7 @@ def Poisson_Solve( bc_left, bc_right, N, q, D=1, linear = True, u_innit = np.arr
                 u += v*V
                 #check for convergence
                 if np.linalg.norm(V) < tol:
-                    print(f"Converged after {i} iterations")
+                    print(f"Newton method converged within the tolerance after {i} iterations")
                     break
     #add boundary conditions to solution
     u = np.append(bc_left.value,u)

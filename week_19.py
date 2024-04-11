@@ -30,26 +30,25 @@ analytical = lambda x: (-a**3*b + a*b**3 + 6*a*D - 6*b*D*alpha-x**3*(a-b) + x*(a
 u, x = solvers.Poisson_Solve(bc_left,bc_right,N,f,D,'root')
 u_anal = analytical(x)
 
-# %%
-plt.scatter(x,u)
-plt.plot(x,u_anal)
-plt.show()
 # %% Test non-linear solver
 a,b = 0,1
 alpha,beta = 0,0
 D = 1
 N = 100
-mu = 0.1
-q = lambda u,x : np.exp(mu * u)
-dq_du = lambda u,x : mu * np.exp(mu * u)
+p = 0.1
+q = lambda u,x,p : np.exp(p * u)
+dq_du = lambda u,x,p : p * np.exp(p * u)
 innit_guess = np.ones(N+1)
 bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
 bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
 linear = False
 solver = 'newton'
-u, x = solvers.Poisson_Solve(bc_left,bc_right,N,q,D=D,linear=linear,solver=solver,u_innit=innit_guess, dq_du=dq_du)
+u, x = solvers.Poisson_Solve(bc_left,bc_right,N,q, p, D=D,linear=linear,solver=solver,u_innit=innit_guess, dq_du=dq_du)
 
-
+analytical = lambda x: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
+u_anal = analytical(x)
 # %%
-plt.plot(x,u)
+plt.scatter(x,u)
+plt.plot(x,u_anal)
+plt.show()
 # %%
