@@ -301,7 +301,7 @@ class Grid():
         self.dx = (b-a)/N
         self.x = np.linspace(a,b,N+1)
 
-def construct_A_b(grid, bc_left, bc_right):
+def construct_A_diags_b(grid, bc_left, bc_right):
 
     N = grid.N
     dx = grid.dx
@@ -318,35 +318,91 @@ def construct_A_b(grid, bc_left, bc_right):
     b[0] = bc_left.value[0]
     b[-1] = bc_right.value[0]
 
+    #initialise u0 and uN for Dirichlet boundary conditions
+    u0 = 1
+    uN = -1
+
     #add values for Neumann and Robin boundary conditions
     if bc_left.type != "Dirichlet":
         A_sup = np.append(2,A_sup)
         A_sub = np.append(1,A_sub)
         A_diag = np.append(-2 * (1 - dx * bc_left.value[2]),A_diag)
         b = np.append(-2 * dx * bc_left.value[1],b)
-
+        u0 = None
     if bc_right.type != "Dirichlet":
         A_sup = np.append(A_sup,1)
         A_sub = np.append(A_sub,2)
         A_diag = np.append(A_diag,-2 * (1 + dx * bc_right.value[2]))
         b = np.append(b, 2 * dx * bc_right.value[1])
+        uN = None
+    return A_sub, A_diag, A_sup, b, u0, uN
 
-    #construct matrix A
+
+# Linear System solvers for Poisson equation using arrays of diagonals and b
+def lin_solve_numpy(A_sub,A_diag,A_sup,b):
     A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    u = np.linalg.solve(A,b)
+    return u
 
-    return A,b
+def lin_solve_scipy(A_sub,A_diag,A_sup,b):
+    """
+    Solves a linear system of equations using the root solver from scipy.optimize
+    Parameters:
+        A (np array): matrix A in the system of equations Ax = b
+        b (np array): vector b in the system of equations Ax = b
+    Returns:
+        u (np array): solution to the system of equations
+    """
+    A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    f = lambda u: A@u - b
+    result = opt.root(f,np.zeros(len(b)))
+    if result.success:
+        u = result.x
+    else:
+        raise ValueError("Root solver failed")
+    return u
+
+def lin_solve_thomas(A_sub, A_diag, A_sup, b):
+    """
+    Solves a tridiagonal system of equations using the Thomas algorithm.
+    Parameters:
+        A_sub (np array): subdiagonal of the matrix A
+        A_diag (np array): diagonal of the matrix A
+        A_sup (np array): superdiagonal of the matrix A
+        b (np array): vector b in the system of equations Ax = b
+    Returns:
+        u (np array): solution to the system of equations
+    """
+    N = len(b)
+    #initialize arrays for the algorithm
+    c = np.zeros(N-1)
+    d = np.zeros(N)
+    u = np.zeros(N)
+    #forward sweep
+    c[0] = A_sup[0]/A_diag[0]
+    d[0] = b[0]/A_diag[0]
+    for i in range(1, N-1):
+        c[i] = A_sup[i]/(A_diag[i] - A_sub[i-1]*c[i-1])
+        d[i] = (b[i] - A_sub[i-1]*d[i-1])/(A_diag[i] - A_sub[i-1]*c[i-1])
+    #backward sweep
+    d[-1] = (b[-1] - A_sub[-1]*d[-2])/(A_diag[-1] - A_sub[-1]*c[-1])
+    u[-1] = d[-1]
+    for i in range(N-2, -1, -1):
+        u[i] = d[i] - c[i]*u[i+1]
+    return u
 
 
 
 
-def Poisson_Solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
+def poisson_solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
         bc_left (Boundary_Condition): left boundary condition
         bc_right (Boundary_Condition): right boundary condition
         N (int): number of grid points
-        q (function): source term, function of x OR u
+        q (function): source term, function of x, (u) and p 
+
         solver (string): solver used for linear system
     Returns:
         u (np array): solution to the Poisson equation
@@ -355,77 +411,66 @@ def Poisson_Solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.a
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
 
-    # find matrix A and vector c
-    A,b = construct_A_b(grid, bc_left, bc_right)
-
-    #boolean variable to define the start and end grid points for the system of equations
-    if bc_left.type == "Dirichlet":
-        u_0 = 1
+    # find diagonals of matrix A and vector b given boundary consitions
+    #set up variables u0 and uN that determine the first and last grid values used in the solver
+    A_sub, A_diag, A_sup, b, u0, uN = construct_A_diags_b(grid, bc_left, bc_right)
+    #choose solver
+    #TODO: add Newton's method
+    if solver == 'solve':
+        lin_solve = lin_solve_numpy
+    elif solver == 'root':
+        lin_solve = lin_solve_scipy
+    elif solver == 'thomas':
+        lin_solve = lin_solve_thomas
     else:
-        u_0 = None
-
-    if bc_right.type == "Dirichlet":
-        u_N = -1
-    else:
-        u_N = None
+        raise ValueError("Unsupported solver: {}".format(solver))
     
-
-    #find number of arguments to q
+    #find number of arguments to q to determine if the source term is linear or non-linear
     n_args = len(inspect.signature(q).parameters)
-
     if n_args == 2:
-        #solve linear system
-        if solver == 'solve':
-            u = np.linalg.solve(A, -b - dx**2/D * q(grid.x[u_0:u_N], p))
-        #TODO: add Newton's method
-        #TODO: add Thomas algorithm for tridiagonal matrices
-        elif solver == 'root':
-            f = lambda u: A@u + b + dx**2/D * q(u,grid.x[u_0:u_N], p)
-            result = opt.root(f,np.zeros(grid.N-1))
-            if result.success:
-                u = result.x
-            else:
-                raise ValueError("Root solver failed")
-        else:
-            raise ValueError("Unsupported solver: {}".format(solver))
-    
+        # define constant vector c
+        c = -b - dx**2/D * q(grid.x[u0:uN],p)
+        #solve linear system of the shape Au = c using chosen solver
+        u = lin_solve(A_sub,A_diag,A_sup,c)
     #solve non-linear system
     elif n_args == 3:
-        if solver == 'solve':
-            raise ValueError("'solve' solver not supported for non-linear Poisson equation")
-        elif solver == 'root':
-            raise ValueError("'root' solver not supported for non-linear Poisson equation")
-        elif solver == 'newton':
-            #initialise first guess for u
-            if u_innit.any() == None:
-                u = np.zeros(len(b))
-            else:
-                u = u_innit[u_0:u_N]
+        #if solver == 'solve':
+            #raise ValueError("'solve' solver not supported for non-linear Poisson equation")
+        #elif solver == 'root':
+            #raise ValueError("'root' solver not supported for non-linear Poisson equation")
+        #elif solver == 'newton':
+        
+        #initialise first guess for u
+        if u_innit.any() == None:
+            u = np.zeros(len(b))
+        else:
+            u = u_innit[u0:uN]
 
-            #define Jacobian of source term
-            if dq_du is None:
-                #TODO: add finite difference approximation for dq_du
-                raise ValueError("dq_du must be provided for non-linear Poisson equation")
+        #define Jacobian of source term
+        if dq_du is None:
+            #TODO: add finite difference approximation for dq_du
+            raise ValueError("dq_du must be provided for non-linear Poisson equation")
 
-            J_q = np.diag(dq_du(u,grid.x[u_0:u_N], p))
-            #solve for u using Newton's method
-            for i in range(max_iter):
-                print(i)
-                print(u)
-                #compute discretised residual
-                F = A@u + b + dx**2/D * q(u,grid.x[u_0:u_N], p)
-                #define Jacobian of the system
-                J_F = A + dx**2/D * J_q
-                #solve for correction V
-                #TODO: add Thomas algorithm for tridiagonal matrices
-                V = np.linalg.solve(J_F,-F)
-                #update u
-                u += v*V
-                #check for convergence
-                if np.linalg.norm(V) < tol:
-                    print(f"Newton method converged within the tolerance after {i} iterations")
-                    break
-    
+        J_q = np.diag(dq_du(u,grid.x[u0:uN], p))
+        #solve for u using Newton's method
+        for i in range(max_iter):
+            #form matrix A
+            A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+            #compute discretised residual
+            F = A@u + b + dx**2/D * q(u,grid.x[u0:uN], p)
+            #define Jacobian of the system
+            J_F = A + dx**2/D * J_q
+            #extract diagonals of Jacobian
+            J_sub, J_diag, J_sup = np.diag(J_F,-1), np.diag(J_F,0), np.diag(J_F,1)
+            #solve for correction V using linear solver
+            V = lin_solve(J_sub,J_diag,J_sup,-F)
+            #update u
+            u += v*V
+            #check for convergence
+            if np.linalg.norm(V) < tol:
+                print(f"Newton method converged within the tolerance after {i} iterations")
+                break
+
     #add boundary conditions to solution for Dirichlet boundary conditions
     if bc_left.type == "Dirichlet":
         u = np.append(bc_left.value[0],u)

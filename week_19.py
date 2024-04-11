@@ -5,17 +5,18 @@ import matplotlib.pyplot as plt
 from numpy import sin, cos, sqrt
 #%%
 a = 0
-b = 10
-alpha = 0
-beta = -10
+b = 1
+alpha = -1.5
+beta = 3
 D = 1
-N = 1000
-f = lambda x: np.ones(len(x))
+N = 10000
+f = lambda x,p: np.ones(len(x))
 bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
-bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
-analytical = lambda x: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
-u, x = solvers.Poisson_Solve(bc_left,bc_right,N,f,D,'root')
-u_anal = analytical(x)
+bc_right = solvers.Boundary_Condition("Neumann",b,-4.5)
+solver = 'thomas'
+analytical = lambda x,p: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
+u, x = solvers.poisson_solve(bc_left,bc_right,N,f,np.nan,solver = solver)
+u_anal = analytical(x,0)
 #%%
 a = 1
 b = 10
@@ -25,9 +26,9 @@ bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
 bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
 D = 2
 N = 1000
-f = lambda x: x
+f = lambda x,p: x
 analytical = lambda x: (-a**3*b + a*b**3 + 6*a*D - 6*b*D*alpha-x**3*(a-b) + x*(a**3 - b**3 + 6*D*alpha - 6*D)) / (6*D*(a-b))
-u, x = solvers.Poisson_Solve(bc_left,bc_right,N,f,D,'root')
+u, x = solvers.poisson_solve(bc_left,bc_right,N,f,np.nan)
 u_anal = analytical(x)
 
 # %% Test non-linear solver
@@ -42,8 +43,8 @@ innit_guess = np.ones(N+1)
 bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
 bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
 linear = False
-solver = 'newton'
-u, x = solvers.Poisson_Solve(bc_left,bc_right,N,q, p, D=D,linear=linear,solver=solver,u_innit=innit_guess, dq_du=dq_du)
+solver = 'thomas'
+u, x = solvers.poisson_solve(bc_left,bc_right,N,q, p, D=D,linear=linear,u_innit=innit_guess, dq_du=dq_du, tol = 10-10, solver = solver)
 
 analytical = lambda x: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
 u_anal = analytical(x)
