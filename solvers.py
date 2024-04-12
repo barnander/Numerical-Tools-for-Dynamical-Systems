@@ -317,32 +317,36 @@ class Boundary_Condition():
         if self.type == "Dirichlet":
             if callable(value):
                 self.homo = 0
+                self.value = value
             elif isinstance(value, (int, float)):
                 self.homo = 1
+                self.value = lambda t: value
             else:
                 raise ValueError("The value for Dirichlet boundary condition must be a function or a number.")
-            self.value = value
+            
 
         elif self.type == "Neumann":
             if callable(value):
                 self.homo = 0
+                self.value = (value, lambda t: 0)
             elif isinstance(value, (int, float)):
                 self.homo = 1
+                self.value = (lambda t: value, lambda t: 0)
             else:
                 raise ValueError("The value for Neumann boundary condition must be a function or a number.")
-            self.value = (value,0)
 
         elif self.type == "Robin":
             if isinstance(value, tuple) and len(value) == 2:
                 if (callable(value[0]) and callable(value[1])):
                     self.homo = 0
+                    self.value = value
                 elif (isinstance(value[0], (int, float)) and isinstance(value[1], (int, float))):
                     self.homo = 1
+                    self.value = (lambda t: value[0], lambda t: value[1])
                 else:
                     raise ValueError("The values for Robin boundary condition must be either two functions or two numbers.")
             else:
                 raise ValueError("The value for Robin boundary condition must be a tuple of two functions or two numbers.")
-            self.value = value
 
         else:
             raise ValueError("Unsupported boundary condition type: {}".format(type(value)))
@@ -394,15 +398,7 @@ def construct_A_diags_b(grid, bc_left, bc_right):
     N = grid.N
     dx = grid.dx
 
-    #determine if a boundary condition is homogeneous
-    homo = bc_left.homo and bc_right.homo
 
-    #if either bc is non homogeneous, A_diag and b become functions of t
-    #thus the arrays need to be initialised as object arrays
-    if homo:
-        array_type = np.float64
-    else:
-        array_type = object
 
     #Make general tridiagonal matrix A
     #superdiagonal
@@ -410,23 +406,23 @@ def construct_A_diags_b(grid, bc_left, bc_right):
     #subdiagonal
     A_sub = np.ones(N-2)
     #diagonal
-    A_diag = -2*np.ones(N-1, dtype = array_type)
+    A_diag = -2*np.ones(N-1, dtype = object)
 
     #make general vector b
-    b = np.zeros(N-1, dtype= array_type)
+    b = np.zeros(N-1, dtype= object)
 
     #initialise left_ind and right_ind for Dirichlet boundary conditions
     left_ind = 1
     right_ind = -1
 
-    
+
     if bc_left.type == "Dirichlet":
         b[0] = bc_left.value
     else:
         A_sup = np.append(2,A_sup)
         A_sub = np.append(1,A_sub)
-        A_diag = np.append(-2 * (1 - dx * bc_left.value[1]),A_diag)
-        b = np.append(-2 * dx * bc_left.value[0],b)
+        A_diag = np.append(lambda t: -2 * (1 - dx * bc_left.value[1](t)),A_diag)
+        b = np.append(lambda t: -2 * dx * bc_left.value[0](t),b)
         left_ind = None
 
     if bc_right.type == "Dirichlet":
@@ -434,19 +430,26 @@ def construct_A_diags_b(grid, bc_left, bc_right):
     else:
         A_sup = np.append(A_sup,1)
         A_sub = np.append(A_sub,2)
-        A_diag = np.append(A_diag,-2 * (1 + dx * bc_right.value[1]))
-        b = np.append(b, 2 * dx * bc_right.value[0])
+        A_diag = np.append(A_diag,lambda t: -2 * (1 + dx * bc_right.value[1](t)) )
+        b = np.append(b,lambda t: 2 * dx * bc_right.value[0](t))
         right_ind = None
 
+    #determine if voth boundary condition are homogeneous
+    homo = bc_left.homo and bc_right.homo
+
+    #if either bc is non homogeneous, A_diag and b are returned as functions of t
+    #otherwise, they are returned as vectors
     if homo:
-        return A_sub, A_diag, A_sup, b, left_ind, right_ind
+        A_diag_vec = np.array([f(np.nan) if callable(f) else f for f in A_diag], dtype = np.float64)
+        b_vec = np.array([f(np.nan) if callable(f) else f for f in b],dtype = np.float64)
+        return A_sub, A_diag_vec , A_sup, b_vec, left_ind, right_ind
     
     else:
         def A_diag_func(t):
-            A_diag_t = [f(t) if callable(f) else f for f in A_diag]
+            A_diag_t = np.array([f(t) if callable(f) else f for f in A_diag],dtype = np.float64)
             return A_diag_t
         def b_func(t):
-            b_t = [f(t) if callable(f) else f for f in b]
+            b_t = np.array([f(t) if callable(f) else f for f in b],dtype = np.float64)
             return b_t
         return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
 
