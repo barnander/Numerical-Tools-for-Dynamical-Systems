@@ -310,30 +310,58 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     return x_T,ps
 
 class Boundary_Condition():
-    def __init__(self,BC_type,x,value):
+    def __init__(self, BC_type, x, value):
         self.type = BC_type
         self.x = x
+
         if self.type == "Dirichlet":
-            assert type(value) == float or type(value) == int, "Dirichlet BC value must be a number"
-            self.value = (value,0,0)
+            if callable(value):
+                self.homo = 0
+            elif isinstance(value, (int, float)):
+                self.homo = 1
+            else:
+                raise ValueError("The value for Dirichlet boundary condition must be a function or a number.")
+            self.value = value
+
         elif self.type == "Neumann":
-            type(value) == float or type(value) == int, "Neumann BC value must be a number"
-            self.value = (0,value,0)
+            if callable(value):
+                self.homo = 0
+            elif isinstance(value, (int, float)):
+                self.homo = 1
+            else:
+                raise ValueError("The value for Neumann boundary condition must be a function or a number.")
+            self.value = (value,0)
+
         elif self.type == "Robin":
-            assert type(value) == tuple and len(value) == 2, "Robin BC value must be a tuple of length 2"
-            self.value = (0,) + value
+            if isinstance(value, tuple) and len(value) == 2:
+                if (callable(value[0]) and callable(value[1])):
+                    self.homo = 0
+                elif (isinstance(value[0], (int, float)) and isinstance(value[1], (int, float))):
+                    self.homo = 1
+                else:
+                    raise ValueError("The values for Robin boundary condition must be either two functions or two numbers.")
+            else:
+                raise ValueError("The value for Robin boundary condition must be a tuple of two functions or two numbers.")
+            self.value = value
+
         else:
-            raise ValueError("Unsupported boundary condition type: {}".format(type))
-    
-    def add_left(self,u):
+            raise ValueError("Unsupported boundary condition type: {}".format(type(value)))
+
+    def add_left(self,u,t):
         if self.type == "Dirichlet":
-            return np.append(self.value[0],u)
+            if self.homo:
+                return np.append(self.value[0],u)
+            else:
+                return np.append(self.value[0],u)
         else:
             return u
     
-    def add_right(self,u):
+    def add_right(self,u,t):
         if self.type == "Dirichlet":
-            return np.append(u,self.value[0])
+            if self.homo:
+                return np.append(u, self.value[0],u)
+            else:
+                return np.append(self.value[0])
         else:
             return u
 
@@ -365,37 +393,62 @@ def construct_A_diags_b(grid, bc_left, bc_right):
 
     N = grid.N
     dx = grid.dx
+
+    #determine if a boundary condition is homogeneous
+    homo = bc_left.homo and bc_right.homo
+
+    #if either bc is non homogeneous, A_diag and b become functions of t
+    #thus the arrays need to be initialised as object arrays
+    if homo:
+        array_type = np.float64
+    else:
+        array_type = object
+
     #Make general tridiagonal matrix A
     #superdiagonal
     A_sup = np.ones(N-2) 
     #subdiagonal
     A_sub = np.ones(N-2)
     #diagonal
-    A_diag = -2*np.ones(N-1)
+    A_diag = -2*np.ones(N-1, dtype = array_type)
 
     #make general vector b
-    b = np.zeros(N-1)
-    b[0] = bc_left.value[0]
-    b[-1] = bc_right.value[0]
+    b = np.zeros(N-1, dtype= array_type)
 
     #initialise left_ind and right_ind for Dirichlet boundary conditions
     left_ind = 1
     right_ind = -1
 
-    #add values for Neumann and Robin boundary conditions
-    if bc_left.type != "Dirichlet":
+    
+    if bc_left.type == "Dirichlet":
+        b[0] = bc_left.value
+    else:
         A_sup = np.append(2,A_sup)
         A_sub = np.append(1,A_sub)
-        A_diag = np.append(-2 * (1 - dx * bc_left.value[2]),A_diag)
-        b = np.append(-2 * dx * bc_left.value[1],b)
+        A_diag = np.append(-2 * (1 - dx * bc_left.value[1]),A_diag)
+        b = np.append(-2 * dx * bc_left.value[0],b)
         left_ind = None
-    if bc_right.type != "Dirichlet":
+
+    if bc_right.type == "Dirichlet":
+        b[-1] = bc_right.value
+    else:
         A_sup = np.append(A_sup,1)
         A_sub = np.append(A_sub,2)
-        A_diag = np.append(A_diag,-2 * (1 + dx * bc_right.value[2]))
-        b = np.append(b, 2 * dx * bc_right.value[1])
+        A_diag = np.append(A_diag,-2 * (1 + dx * bc_right.value[1]))
+        b = np.append(b, 2 * dx * bc_right.value[0])
         right_ind = None
-    return A_sub, A_diag, A_sup, b, left_ind, right_ind
+
+    if homo:
+        return A_sub, A_diag, A_sup, b, left_ind, right_ind
+    
+    else:
+        def A_diag_func(t):
+            A_diag_t = [f(t) if callable(f) else f for f in A_diag]
+            return A_diag_t
+        def b_func(t):
+            b_t = [f(t) if callable(f) else f for f in b]
+            return b_t
+        return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
 
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
@@ -555,9 +608,9 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
 
     #add boundary conditions to solution for Dirichlet boundary conditions
     if bc_left.type == "Dirichlet":
-        u = np.append(bc_left.value[0],u)
+        u = np.append(bc_left.value,u)
     if bc_right.type == "Dirichlet":
-        u = np.append(u,bc_right.value[0])
+        u = np.append(u,bc_right.value)
     return u, grid.x
 
 
@@ -566,11 +619,16 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N, D = 1, solver = 'RK4')
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
     #find diagonals of matrix A and vector b given boundary conditions
-    A_sub, A_diag, A_sup, b, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
-    #reform A
-    A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
     #define du_dt as a function of u and t
     def du_dt(u,t,p):
+        #TODO add non-linear source term
+        if callable(A_diag_t):
+            A = np.diag(A_sup,1) + np.diag(A_diag_t(t),0) + np.diag(A_sub,-1)
+            b = b_t(t)
+        else:
+            A = np.diag(A_sup,1) + np.diag(A_diag_t,0) + np.diag(A_sub,-1)
+            b = b_t
         return D/dx**2 * (A @ u + b)
     
     #ensure stablilty of the time integration
@@ -580,14 +638,23 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N, D = 1, solver = 'RK4')
     
     #solve using one-step solver
     u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = solver)
+
+    #add boundary conditions to solution for Dirichlet boundary conditions
+
+    #TODO: ask if it slows stuff down to make constant bcs into functions instead of using if statements
     if bc_left.type == "Dirichlet":
-        u_left = np.zeros(len(t)) + bc_left.value[0]
+        if callable(bc_left.value):
+            u_left = np.zeros(len(t)) + bc_left.value(t)
+        else:
+            u_left = np.zeros(len(t)) + bc_left.value
         u = np.vstack((u_left,u))
     if bc_right.type == "Dirichlet":
-        u_right = np.zeros(len(t)) + bc_right.value[0]
+        if callable(bc_right.value):
+            u_right = np.zeros(len(t)) + bc_right.value(t)
+        else:   
+            u_right = np.zeros(len(t)) + bc_right.value
         u = np.vstack((u,u_right))
     return u, grid.x, t
-
 
 
 
