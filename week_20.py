@@ -5,62 +5,77 @@ from math import pi
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-#%%
+#%% Example 1
+# Variables that can't change for analytical solution
+alpha = 0
+beta = 0
+
+#
+m = int(2)
 a = 0
 b = 1
 t0 = 0
 t_f = 1
-N = 100
 D = 0.1
 p = np.nan
-bc_left = solvers.Boundary_Condition("Dirichlet",a,lambda t:0)
-bc_right = solvers.Boundary_Condition("Dirichlet",b,0)
-f = lambda x,t: np.sin(pi * (x-a)/(b-a))
-u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f, np.nan, p, N,D = D)
-#%%
+
+#
+q = lambda u,x,t,p: np.zeros(len(x))
+f = lambda x,t: np.sin(m*pi * (x-a)/(b-a))
+
+
+N = 100
+bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
+bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
+
+#analytic derivative
+du_dx = lambda x,t: np.exp(-m**2*D*pi**2 * t/(b-a)**2) * m*pi/(b-a) * np.cos(m*pi * (x-a)/(b-a))
+
+u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f,q , p, N,D = D)
+
 def anal_u(x,t):
-    x_vec = np.sin(pi * (x-a)/(b-a))
+    x_vec = np.sin(m*pi * (x-a)/(b-a))
     x_array = np.tile(x_vec[:,None],(1,len(t)))
-    t_vec = np.exp(-D*pi**2 * t/(b-a)**2)
+    t_vec = np.exp(-m**2*D*pi**2 * t/(b-a)**2)
     u = x_array*t_vec
     return u
 u_anal = anal_u(x,t)
-# %% plot in space domain for t = 0, 0.5, 1
-plt.figure()
-plt.subplot(3,1,1)
-plt.plot(x,u[:,0],label = 'numerical')
-plt.plot(x,u_anal[:,0],label = 'analytical',color = 'black', linestyle = '--')
-plt.title('t = 0')
-plt.legend()
-plt.subplot(3,1,2)
-plt.plot(x,u[:,int(N/2)],label = 'numerical')
-plt.plot(x,u_anal[:,int(N/2)],label = 'analytical',color = 'black', linestyle = '--')
-plt.title('t = 0.5')
-plt.legend()
-plt.subplot(3,1,3)
-plt.plot(x,u[:,-1],label = 'numerical')
-plt.plot(x,u_anal[:,-1],label = 'analytical',color = 'black', linestyle = '--')
-plt.title('t = 1')
-plt.legend()
-plt.show()
-# %% plot in time domain for x = 0, 0.5, 1
-plt.figure()
-plt.subplot(3,1,1)
-plt.plot(t, u[0, :], label='numerical')
-plt.plot(t, u_anal[0, :], label='analytical', color='black', linestyle='--')
-plt.title('x = 0')
-plt.legend()
-plt.subplot(3, 1, 2)
-plt.plot(t, u[int(N/2), :], label='numerical')
-plt.plot(t, u_anal[int(N/2), :], label='analytical', color='black', linestyle='--')
-plt.title('x = 0.5')
-plt.legend()
-plt.subplot(3, 1, 3)
-plt.plot(t, u[-1, :], label='numerical')
-plt.plot(t, u_anal[-1, :], label='analytical', color='black', linestyle='--')
-plt.title('x = 1')
-plt.legend()
-plt.show()
+
+
+
+#%% Example 2
+alpha = 0
+beta = 0
+
+#
+m = int(2)
+a = 0
+b = 1
+t0 = 0
+t_f = 1
+D = 0.1
+p = np.nan
+q = lambda u,x,t,p: -m**2*pi**2*D/(b-a)**2 * np.sin(m*pi * (x-a)/(b-a)) 
+f = lambda x,t: np.zeros(len(x))
+
+#analytic derivative
+du_dx = lambda x,t: (np.exp(-m**2*D*pi**2 * t/(b-a)**2)-1) * m*pi/(b-a) * np.cos(m*pi * (x-a)/(b-a))
+
+bc_left = solvers.Boundary_Condition("Neumann",a, lambda t: du_dx(a,t))
+bc_right = solvers.Boundary_Condition("Dirichlet",b,0)
+
+u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N,D = D)
+
+def anal_u(x,t):
+    x_vec = np.sin(m*pi * (x-a)/(b-a))
+    x_array = np.tile(x_vec[:,None],(1,len(t)))
+    t_vec = np.exp(-m**2*D*pi**2 * t/(b-a)**2)-1
+    u = x_array*t_vec
+    return u
+u_anal = anal_u(x,t)
+
+
+
 # %% 3D plot of numerical solution
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -79,20 +94,3 @@ ax.set_xlabel('x')
 ax.set_ylabel('t')
 ax.set_zlabel('u')
 plt.show()
-
-# %%
-a = 0
-b = 1
-t0 = 0
-t_f = 1
-N = 100
-D = 0.1
-p = np.nan
-
-du_dx = lambda x,t: np.exp(-D*pi**2 * t/(b-a)**2) * pi/(b-a) * np.cos(pi * (x-a)/(b-a))
-
-bc_left = solvers.Boundary_Condition("Dirichlet",a,0)
-bc_right = solvers.Boundary_Condition("Neumann",b,lambda t: du_dx(b,t))
-f = lambda x,t: np.sin(pi * (x-a)/(b-a))
-u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f, np.nan, p, N,D = D)
-# %%

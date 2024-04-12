@@ -320,6 +320,7 @@ class Boundary_Condition():
                 self.value = value
             elif isinstance(value, (int, float)):
                 self.homo = 1
+                #TODO talk about how this isn't ideal but makes code more consice
                 self.value = lambda t: value
             else:
                 raise ValueError("The value for Dirichlet boundary condition must be a function or a number.")
@@ -351,23 +352,27 @@ class Boundary_Condition():
         else:
             raise ValueError("Unsupported boundary condition type: {}".format(type(value)))
 
-    def add_left(self,u,t):
+
+    #TODO try and actually implement this
+    def add_left(self,u,t=np.array([None])):
+        #Adds left BC values back to grid for Dirichlet BCs
         if self.type == "Dirichlet":
-            if self.homo:
-                return np.append(self.value[0],u)
+            if t.any():
+                u_left = np.zeros(len(t)) + self.value(t)
+                u = np.vstack((u_left,u))  
             else:
-                return np.append(self.value[0],u)
-        else:
-            return u
+                u = np.append(self.value(np.nan),u) 
+        return u
     
-    def add_right(self,u,t):
+    def add_right(self,u,t=np.array([None])):
+        #Adds left BC values back to grid for Dirichlet BCs
         if self.type == "Dirichlet":
-            if self.homo:
-                return np.append(u, self.value[0],u)
+            if t.any():
+                u_right = np.zeros(len(t)) + self.value(t)
+                u = np.vstack((u, u_right))  
             else:
-                return np.append(self.value[0])
-        else:
-            return u
+                u = np.append(u, self.value(np.nan))  
+        return u
 
 
 
@@ -434,7 +439,7 @@ def construct_A_diags_b(grid, bc_left, bc_right):
         b = np.append(b,lambda t: 2 * dx * bc_right.value[0](t))
         right_ind = None
 
-    #determine if voth boundary condition are homogeneous
+    #determine if both boundary condition are homogeneous
     homo = bc_left.homo and bc_right.homo
 
     #if either bc is non homogeneous, A_diag and b are returned as functions of t
@@ -610,14 +615,12 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
                 break
 
     #add boundary conditions to solution for Dirichlet boundary conditions
-    if bc_left.type == "Dirichlet":
-        u = np.append(bc_left.value,u)
-    if bc_right.type == "Dirichlet":
-        u = np.append(u,bc_right.value)
+    u = bc_left.add_left(u)
+    u = bc_right.add_right(u)
     return u, grid.x
 
 
-def diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N, D = 1, solver = 'RK4'):
+def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, solver = 'RK4'):
     #discretise in space
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
@@ -632,7 +635,7 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N, D = 1, solver = 'RK4')
         else:
             A = np.diag(A_sup,1) + np.diag(A_diag_t,0) + np.diag(A_sub,-1)
             b = b_t
-        return D/dx**2 * (A @ u + b)
+        return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
     
     #ensure stablilty of the time integration
     dt = dx**2/(4*D)
@@ -645,18 +648,8 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N, D = 1, solver = 'RK4')
     #add boundary conditions to solution for Dirichlet boundary conditions
 
     #TODO: ask if it slows stuff down to make constant bcs into functions instead of using if statements
-    if bc_left.type == "Dirichlet":
-        if callable(bc_left.value):
-            u_left = np.zeros(len(t)) + bc_left.value(t)
-        else:
-            u_left = np.zeros(len(t)) + bc_left.value
-        u = np.vstack((u_left,u))
-    if bc_right.type == "Dirichlet":
-        if callable(bc_right.value):
-            u_right = np.zeros(len(t)) + bc_right.value(t)
-        else:   
-            u_right = np.zeros(len(t)) + bc_right.value
-        u = np.vstack((u,u_right))
+    u = bc_left.add_left(u,t)
+    u = bc_right.add_right(u,t)
     return u, grid.x, t
 
 
