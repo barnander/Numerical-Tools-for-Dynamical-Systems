@@ -310,21 +310,34 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     return x_T,ps
 
 class Boundary_Condition():
-    def __init__(self,type,x,value):
-        self.type = type
+    def __init__(self,BC_type,x,value):
+        self.type = BC_type
         self.x = x
-        if type == "Dirichlet":
+        if self.type == "Dirichlet":
             assert type(value) == float or type(value) == int, "Dirichlet BC value must be a number"
             self.value = (value,0,0)
-        elif type == "Neumann":
+        elif self.type == "Neumann":
             type(value) == float or type(value) == int, "Neumann BC value must be a number"
             self.value = (0,value,0)
-        elif type == "Robin":
+        elif self.type == "Robin":
             assert type(value) == tuple and len(value) == 2, "Robin BC value must be a tuple of length 2"
             self.value = (0,) + value
         else:
             raise ValueError("Unsupported boundary condition type: {}".format(type))
-        
+    
+    def add_left(self,u):
+        if self.type == "Dirichlet":
+            return np.append(self.value[0],u)
+        else:
+            return u
+    
+    def add_right(self,u):
+        if self.type == "Dirichlet":
+            return np.append(u,self.value[0])
+        else:
+            return u
+
+
 
 class Grid():
     def __init__(self,N,a,b):
@@ -457,7 +470,7 @@ def lin_solve_thomas(A_sub, A_diag, A_sup, b):
 
 
 
-def poisson_solve(bc_left, bc_right, N, q, p, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
+def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -548,10 +561,32 @@ def poisson_solve(bc_left, bc_right, N, q, p, D=1, u_innit = np.array(None), v =
     return u, grid.x
 
 
-
-
-
-
+def diffusion_solve(bc_left, bc_right, f,t0,t_f, q, p, N, D = 1, solver = 'RK4'):
+    #discretise in space
+    grid = Grid(N,bc_left.x,bc_right.x)
+    dx = grid.dx
+    #find diagonals of matrix A and vector b given boundary conditions
+    A_sub, A_diag, A_sup, b, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
+    #reform A
+    A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    #define du_dt as a function of u and t
+    def du_dt(u,t,p):
+        return D/dx**2 * (A @ u + b)
+    
+    #ensure stablilty of the time integration
+    dt = dx**2/(4*D)
+    #set up initial conditions
+    u0 = f(grid.x[left_ind:right_ind],t0)
+    
+    #solve using one-step solver
+    u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = solver)
+    if bc_left.type == "Dirichlet":
+        u_left = np.zeros(len(t)) + bc_left.value[0]
+        u = np.vstack((u_left,u))
+    if bc_right.type == "Dirichlet":
+        u_right = np.zeros(len(t)) + bc_right.value[0]
+        u = np.vstack((u,u_right))
+    return u, grid.x, t
 
 
 

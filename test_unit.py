@@ -50,16 +50,16 @@ class Test_Poisson_Solve(unittest.TestCase):
         bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
         solver = 'solve'
         analytical = lambda x: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q,p,solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q,p,N,solver = solver)
         u_anal = analytical(x)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
         #test Poisson solver for scipy root solver
         solver = 'root'
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q,p,solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q,p,N,solver = solver)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
         #test thomas solver
         solver = 'thomas'
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q,p,solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q,p,N,solver = solver)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
     def lin_Neumann(self):
         #test Poisson solver for linear source term, Neumann BCs and all solvers
@@ -77,14 +77,14 @@ class Test_Poisson_Solve(unittest.TestCase):
         bc_right = solvers.Boundary_Condition("Neumann",b,gamma)
         solver = 'thomas'
         analytical = lambda x: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q,p,solver = solver) 
+        u, x = solvers.poisson_solve(bc_left,bc_right,q,p,N,solver = solver) 
         u_anal = analytical(x)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
 
         #test left Neumann BC
         bc_left = solvers.Boundary_Condition("Neumann",a,delta)
         bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q,p,solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q,p,N,solver = solver)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
 
     def test_Poisson_Solve_nonlin(self):
@@ -99,21 +99,21 @@ class Test_Poisson_Solve(unittest.TestCase):
         bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
         bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
         solver = 'solve'
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q, p,u_innit=innit_guess, dq_du=dq_du, tol = 1e-10, solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q, p,N,u_innit=innit_guess, dq_du=dq_du, tol = 1e-10, solver = solver)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
 
         #test Poisson solver for non-linear source term, Neumann right BC and scipy root solver
         gamma = (u[-1]-u[-3])/(x[-1]-x[-3])
         bc_right = solvers.Boundary_Condition("Neumann",b,gamma)
         solver = 'root'
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q, p,u_innit=innit_guess, dq_du=dq_du, tol = 1e-10, solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q, p,N,u_innit=innit_guess, dq_du=dq_du, tol = 1e-10, solver = solver)
         self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
         #test Poisson solver for non-linear source term, Neumann left BC and thomas solver
         bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
         gamma = (u[2]-u[0])/(x[2]-x[0])
         bc_left = solvers.Boundary_Condition("Neumann",a,gamma)
         solver = 'thomas'
-        u, x = solvers.poisson_solve(bc_left,bc_right,N,q, p,u_innit=innit_guess, dq_du=dq_du, tol = 1e-10, solver = solver)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q, p,N,u_innit=innit_guess, dq_du=dq_du, tol = 1e-10, solver = solver)
 
 if __name__ == '__main__':
     unittest.main()
