@@ -132,7 +132,8 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
         phase_cond (function): function of x and t that describes the phase condition of the LC
                                 (if the value is set to False, the phase condition is set to zero velocity in the first state variable at time t = 0)
     Returns:
-        x_T0_solved (np array): array of solved initial conditions to the Limit Cycle and period
+        x (np array): solved initial condition to the Limit Cycle
+        T (float): period of the Limit Cycle
     """
     p,_ = param_assert(p)
     if not phase_cond:
@@ -160,8 +161,10 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
 
     
     #run scipy newton root-finder on g with initial guess
-    x_T0_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #make sure rootfinder tol is higher than integrator tol to avoid numerical issues
-    return x_T0_solved[:-1], x_T0_solved[-1]
+    x_T_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #make sure rootfinder tol is higher than integrator tol to avoid numerical issues
+    x = x_T_solved[:-1]
+    T = x_T_solved[-1]
+    return x, T
 
 
 
@@ -205,6 +208,20 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 100, LC = True):
     return x_T,ps.transpose()
 
 def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
+    """
+    Performs one step of pseudo-arclength continuation on system of ODEs.
+    Parameters:
+        ode (function): function of x (np array), t (float), and p (np array, integer or float) describing system of odes
+        x_T0 (np array): value of fixed point of the system (include initial period guess for LCs as last element of the array) at step i-1
+        p0 (np array): parameter value(s) at step i-1
+        x_T1 (np array): value of fixed point of the system (include initial period guess for LCs as last element of the array) at step i
+        p1 (np array): parameter value(s) at step i
+        p_ind (int): index of the parameter that changes
+        LC (bool): if False, only equilibrium solutions are computed (not Limit Cycles)
+    Returns:
+        x_T2 (np array): value of fixed point of the system (includes initial period guess for LCs as last element of the array) at step i+1
+        p2 (np array): parameter value(s) at step i+1
+    """
     #TODO: include in same func as natural param cont    
     #TODO make it work with multiple parameters and with LC finder
 
@@ -217,6 +234,7 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
     v_pred = v1 + delta
     #define function to solve
     if LC:
+        #TODO: add LC solver
         basil = 5
     else:
         def root_solve(v2):
@@ -239,19 +257,32 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
 
 
 def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
+    """
+    Performs pseudo-arclength continuation on system of ODEs.
+    Parameters:
+        ode (function): function of x (np array), t (float), and p (np array, integer or float) describing system of odes
+        x_T0 (np array): initial guess of value of fixed point of the system (include initial period guess for LCs as last element of the array)
+        p0 (np array): initial parameter value(s)
+        pend (np array): final parameter value(s)
+        p_ind (int): index of the parameter that changes
+        max_it (int): maximum number of iterations
+        innit_h (float): initial step size
+    """
+    #TODO add LC solver
+    #check that p0 and pend are the same type, length and that only one parameter changes:
     p0,pend = param_assert(p0,pend)
-    print(p0)
     assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
+
+    #find X_T0
+    x_T0 = opt.fsolve(lambda x: ode(x,np.nan,p0),x_T0)
 
     #find out wether we increase or decrease the parameter.
     direction = np.sign(pend[p_ind]-p0[p_ind])
-    
     #do a step of natural parameter continuation to find v1
     p1 = p0.copy()
     p1[p_ind] = p0[p_ind] + direction * innit_h #making sure to take a step in the direction of pend
-    print(p0[p_ind] + direction * innit_h)
     x_T1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
-    print(p0,p1)
+
     #initialise array of solutions
     x_T = np.tile(np.nan,(np.size(x_T0),int(max_it)+2))
     ps = np.tile(np.nan,(np.size(p0),int(max_it)+2))
@@ -279,15 +310,17 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     return x_T,ps
 
 class Boundary_Condition():
-    #TODO: add Neumann and Robin boundary conditions
     def __init__(self,type,x,value):
         self.type = type
         self.x = x
         if type == "Dirichlet":
+            assert type(value) == float or type(value) == int, "Dirichlet BC value must be a number"
             self.value = (value,0,0)
         elif type == "Neumann":
+            type(value) == float or type(value) == int, "Neumann BC value must be a number"
             self.value = (0,value,0)
         elif type == "Robin":
+            assert type(value) == tuple and len(value) == 2, "Robin BC value must be a tuple of length 2"
             self.value = (0,) + value
         else:
             raise ValueError("Unsupported boundary condition type: {}".format(type))
@@ -302,6 +335,20 @@ class Grid():
         self.x = np.linspace(a,b,N+1)
 
 def construct_A_diags_b(grid, bc_left, bc_right):
+    """
+    Constructs the diagonals of tridiagonal matrix A and the vector b for the Poisson equation given the grid and boundary conditions.
+    Parameters:
+        grid (Grid): grid object defining space discretisation
+        bc_left (Boundary_Condition): left boundary condition
+        bc_right (Boundary_Condition): right boundary condition
+    Returns:
+        A_sub (np array): subdiagonal of the matrix A
+        A_diag (np array): diagonal of the matrix A
+        A_sup (np array): superdiagonal of the matrix A
+        b (np array): vector b in the system of equations Ax = b
+        left_ind (int/None): index of the leftmost grid point used in the solver
+        right_ind (int/None): index of the rightmost grid point used in the solver
+    """
 
     N = grid.N
     dx = grid.dx
@@ -318,9 +365,9 @@ def construct_A_diags_b(grid, bc_left, bc_right):
     b[0] = bc_left.value[0]
     b[-1] = bc_right.value[0]
 
-    #initialise u0 and uN for Dirichlet boundary conditions
-    u0 = 1
-    uN = -1
+    #initialise left_ind and right_ind for Dirichlet boundary conditions
+    left_ind = 1
+    right_ind = -1
 
     #add values for Neumann and Robin boundary conditions
     if bc_left.type != "Dirichlet":
@@ -328,32 +375,48 @@ def construct_A_diags_b(grid, bc_left, bc_right):
         A_sub = np.append(1,A_sub)
         A_diag = np.append(-2 * (1 - dx * bc_left.value[2]),A_diag)
         b = np.append(-2 * dx * bc_left.value[1],b)
-        u0 = None
+        left_ind = None
     if bc_right.type != "Dirichlet":
         A_sup = np.append(A_sup,1)
         A_sub = np.append(A_sub,2)
         A_diag = np.append(A_diag,-2 * (1 + dx * bc_right.value[2]))
         b = np.append(b, 2 * dx * bc_right.value[1])
-        uN = None
-    return A_sub, A_diag, A_sup, b, u0, uN
+        right_ind = None
+    return A_sub, A_diag, A_sup, b, left_ind, right_ind
 
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
 def lin_solve_numpy(A_sub,A_diag,A_sup,b):
+    """
+    Solves a linear system of equations of the form Ax = b, where A is a tridiagonal matrix, using the numpy linear solver
+    Parameters:
+        A_sub (np array): subdiagonal of the matrix A
+        A_diag (np array): diagonal of the matrix A
+        A_sup (np array): superdiagonal of the matrix A
+        b (np array): vector b in the system of equations Ax = b
+    Returns:
+        u (np array): solution to the system of equations
+    """
+    #construct matrix A
     A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    #solve for u
     u = np.linalg.solve(A,b)
     return u
 
 def lin_solve_scipy(A_sub,A_diag,A_sup,b):
     """
-    Solves a linear system of equations using the root solver from scipy.optimize
+    Solves a linear system of equations of the form Ax = b, where A is a tridiagonal matrix, using the root solver from scipy.optimize
     Parameters:
-        A (np array): matrix A in the system of equations Ax = b
+        A_sub (np array): subdiagonal of the matrix A
+        A_diag (np array): diagonal of the matrix A
+        A_sup (np array): superdiagonal of the matrix A
         b (np array): vector b in the system of equations Ax = b
     Returns:
         u (np array): solution to the system of equations
     """
+    #construct matrix A
     A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    #solve for u
     f = lambda u: A@u - b
     result = opt.root(f,np.zeros(len(b)))
     if result.success:
@@ -394,26 +457,34 @@ def lin_solve_thomas(A_sub, A_diag, A_sup, b):
 
 
 
-def poisson_solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
+def poisson_solve(bc_left, bc_right, N, q, p, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
         bc_left (Boundary_Condition): left boundary condition
         bc_right (Boundary_Condition): right boundary condition
         N (int): number of grid points
-        q (function): source term, function of x, (u) and p 
-
-        solver (string): solver used for linear system
+        q (function): source term, function of x, (u) and p
+        p (np array): parameter(s) of the source term
+        D (float): diffusion coefficient
+        u_innit (np array): initial guess for the solution
+        v (float): damping factor for Newton's method (0<v<=1)
+        dq_du (function): derivative of the source term with respect to u
+        max_iter (int): maximum number of iterations for Newton's method
+        tol (float): tolerance for Newton's method
+        solver (string): solver used for linear systems
     Returns:
         u (np array): solution to the Poisson equation
+        grid.x (np array): grid points
     """
     #form grid
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
 
-    # find diagonals of matrix A and vector b given boundary consitions
-    #set up variables u0 and uN that determine the first and last grid values used in the solver
-    A_sub, A_diag, A_sup, b, u0, uN = construct_A_diags_b(grid, bc_left, bc_right)
+    # find diagonals of matrix A and vector b given boundary conditions
+    #set up variables left_ind and right_ind that determine the first and last grid values used in the solver
+    A_sub, A_diag, A_sup, b, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
+    
     #choose solver
     #TODO: add Newton's method
     if solver == 'solve':
@@ -427,37 +498,35 @@ def poisson_solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.a
     
     #find number of arguments to q to determine if the source term is linear or non-linear
     n_args = len(inspect.signature(q).parameters)
+
     if n_args == 2:
+        #solve linear system using chosen solver
         # define constant vector c
-        c = -b - dx**2/D * q(grid.x[u0:uN],p)
+        c = -b - dx**2/D * q(grid.x[left_ind:right_ind],p)
         #solve linear system of the shape Au = c using chosen solver
         u = lin_solve(A_sub,A_diag,A_sup,c)
-    #solve non-linear system
+
     elif n_args == 3:
-        #if solver == 'solve':
-            #raise ValueError("'solve' solver not supported for non-linear Poisson equation")
-        #elif solver == 'root':
-            #raise ValueError("'root' solver not supported for non-linear Poisson equation")
-        #elif solver == 'newton':
-        
+        #solve non-linear system using Newton's method
         #initialise first guess for u
         if u_innit.any() == None:
+            #default to zero vector
             u = np.zeros(len(b))
         else:
-            u = u_innit[u0:uN]
+            u = u_innit[left_ind:right_ind]
 
         #define Jacobian of source term
         if dq_du is None:
             #TODO: add finite difference approximation for dq_du
             raise ValueError("dq_du must be provided for non-linear Poisson equation")
 
-        J_q = np.diag(dq_du(u,grid.x[u0:uN], p))
+        J_q = np.diag(dq_du(u,grid.x[left_ind:right_ind], p))
         #solve for u using Newton's method
         for i in range(max_iter):
             #form matrix A
             A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
             #compute discretised residual
-            F = A@u + b + dx**2/D * q(u,grid.x[u0:uN], p)
+            F = A@u + b + dx**2/D * q(u,grid.x[left_ind:right_ind], p)
             #define Jacobian of the system
             J_F = A + dx**2/D * J_q
             #extract diagonals of Jacobian
@@ -477,6 +546,7 @@ def poisson_solve(bc_left, bc_right, N, q, p, D=1, linear = True, u_innit = np.a
     if bc_right.type == "Dirichlet":
         u = np.append(u,bc_right.value[0])
     return u, grid.x
+
 
 
 
