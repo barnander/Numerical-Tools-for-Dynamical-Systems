@@ -39,21 +39,25 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
         return np.array([x0]),t0
 
     #initialise t and x arrays
-    t = np.arange(t0,t_f,delta_max) #plus 1 so we include t0 and t_f
-    t[0] = t0
-    t = np.append(t,t_f)
+    t = discr_t(t0,t_f,delta_max)
+
     x = np.zeros((len(x0),len(t)))
-    h = delta_max
+    x[0] = x0
     x_n = x0
-    for i,t_n in enumerate(t):
+    h = delta_max
+    for i,t_n in enumerate(t[:-2]):
         #iterate through functions, computing the next value for each state variable
-            if t_n == t_f:
-                h = t_n - t[-2] #adapts the final h to give the solution at exactly t_final
         x_n = solve_step(f,x_n,t_n,h)
-        x[:,i] = x_n
-        t[i] = t_n
+        x[:,i+1] = x_n
+    h = t_f - t[-2] #adapts the final h to give the solution at exactly t_final
+    x[:,-1] = solve_step(f,x_n,t[-2],h)
     return x,t
 
+def discr_t(t0,t_f,delta_max):
+    t = np.arange(t0,t_f,delta_max) 
+    t[0] = t0
+    t = np.append(t,t_f)
+    return t
 
 
 def param_assert(p0, pend=None):
@@ -657,8 +661,8 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = False ,ex
         #solve using one-step solver
         u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = solver)
 
-    else:
-        t = 
+    #else:
+        #t = 
 
 
 
