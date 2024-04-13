@@ -2,6 +2,7 @@
 import numpy as np
 import scipy.optimize as opt
 import inspect
+import matplotlib.pyplot as plt
 #%% Functions
 #one-step solvers wrapper
 def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
@@ -42,7 +43,7 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     t = discr_t(t0,t_f,delta_max)
 
     x = np.zeros((len(x0),len(t)))
-    x[0] = x0
+    x[:,0] = x0
     x_n = x0
     h = delta_max
     for i,t_n in enumerate(t[:-2]):
@@ -320,10 +321,8 @@ class Boundary_Condition():
 
         if self.type == "Dirichlet":
             if callable(value):
-                self.homo = 0
                 self.value = value
             elif isinstance(value, (int, float)):
-                self.homo = 1
                 #TODO talk about how this isn't ideal but makes code more consice
                 self.value = lambda t: value
             else:
@@ -332,10 +331,8 @@ class Boundary_Condition():
 
         elif self.type == "Neumann":
             if callable(value):
-                self.homo = 0
                 self.value = (value, lambda t: 0)
             elif isinstance(value, (int, float)):
-                self.homo = 1
                 self.value = (lambda t: value, lambda t: 0)
             else:
                 raise ValueError("The value for Neumann boundary condition must be a function or a number.")
@@ -343,10 +340,10 @@ class Boundary_Condition():
         elif self.type == "Robin":
             if isinstance(value, tuple) and len(value) == 2:
                 if (callable(value[0]) and callable(value[1])):
-                    self.homo = 0
+
                     self.value = value
                 elif (isinstance(value[0], (int, float)) and isinstance(value[1], (int, float))):
-                    self.homo = 1
+
                     self.value = (lambda t: value[0], lambda t: value[1])
                 else:
                     raise ValueError("The values for Robin boundary condition must be either two functions or two numbers.")
@@ -397,9 +394,9 @@ def construct_A_diags_b(grid, bc_left, bc_right):
         bc_right (Boundary_Condition): right boundary condition
     Returns:
         A_sub (np array): subdiagonal of the matrix A
-        A_diag (np array): diagonal of the matrix A
+        A_diag_func (func): diagonal of the matrix A as a function of t
         A_sup (np array): superdiagonal of the matrix A
-        b (np array): vector b in the system of equations Ax = b
+        b_func (func)): vector b in the system of equations Ax = b as a function of time
         left_ind (int/None): index of the leftmost grid point used in the solver
         right_ind (int/None): index of the rightmost grid point used in the solver
     """
@@ -443,29 +440,30 @@ def construct_A_diags_b(grid, bc_left, bc_right):
         b = np.append(b,lambda t: 2 * dx * bc_right.value[0](t))
         right_ind = None
 
-    #determine if both boundary condition are homogeneous
-    homo = bc_left.homo and bc_right.homo
-
-    #if either bc is non homogeneous, A_diag and b are returned as functions of t
-    #otherwise, they are returned as vectors
-    if homo:
-        A_diag_vec = np.array([f(np.nan) if callable(f) else f for f in A_diag], dtype = np.float64)
-        b_vec = np.array([f(np.nan) if callable(f) else f for f in b],dtype = np.float64)
-        return A_sub, A_diag_vec , A_sup, b_vec, left_ind, right_ind
+    def A_diag_func(t):
+        A_diag_t = np.array([f(t) if callable(f) else f for f in A_diag],dtype = np.float64)
+        return A_diag_t
+    def b_func(t):
+        b_t = np.array([f(t) if callable(f) else f for f in b],dtype = np.float64)
+        return b_t
     
-    else:
-        def A_diag_func(t):
-            A_diag_t = np.array([f(t) if callable(f) else f for f in A_diag],dtype = np.float64)
-            return A_diag_t
-        def b_func(t):
-            b_t = np.array([f(t) if callable(f) else f for f in b],dtype = np.float64)
-            return b_t
-        return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
+
+    #TODO note that this is not the most efficient way to do this, but it is the most general
+    return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
 
 def reform_A(A_sub,A_diag,A_sup):
     return np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
+def choose_lin_solve(solver_name):
+    if solver_name == 'solve':
+        return lin_solve_numpy
+    elif solver_name == 'root':
+        return lin_solve_scipy
+    elif solver_name == 'thomas':
+        return lin_solve_thomas
+    else:
+        raise ValueError("Unsupported solver: {}".format(solver_name))
 def lin_solve_numpy(A_sub,A_diag,A_sup,b):
     """
     Solves a linear system of equations of the form Ax = b, where A is a tridiagonal matrix, using the numpy linear solver
@@ -563,18 +561,11 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
 
     # find diagonals of matrix A and vector b given boundary conditions
     #set up variables left_ind and right_ind that determine the first and last grid values used in the solver
-    A_sub, A_diag, A_sup, b, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
-    
+    A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
+    A_diag,b = A_diag_func(np.nan), b_func(np.nan)
     #choose solver
     #TODO: add Newton's method
-    if solver == 'solve':
-        lin_solve = lin_solve_numpy
-    elif solver == 'root':
-        lin_solve = lin_solve_scipy
-    elif solver == 'thomas':
-        lin_solve = lin_solve_thomas
-    else:
-        raise ValueError("Unsupported solver: {}".format(solver))
+    lin_solve = choose_lin_solve(solver)
     
     #find number of arguments to q to determine if the source term is linear or non-linear
     n_args = len(inspect.signature(q).parameters)
@@ -597,8 +588,9 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
 
         #define Jacobian of source term
         if dq_du is None:
-            #TODO: add finite difference approximation for dq_du
-            raise ValueError("dq_du must be provided for non-linear Poisson equation")
+            #finite difference approximation for dq_du
+            eps = 1e-6
+            dq_du = lambda u, x, p: (q(u + eps, x, p) - q(u - eps, x, p)) / (2 * eps)
 
         J_q = np.diag(dq_du(u,grid.x[left_ind:right_ind], p))
         #solve for u using Newton's method
@@ -626,48 +618,60 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
     return u, grid.x
 
 
-def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = False ,explicit = True ,solver = 'RK4'):
+def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , explicit_solver = 'RK4' ,implicit_solver = False):
     #discretise in space
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
 
     #find diagonals of matrix A and vector b given boundary conditions
     A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
+    
+    #set up u0
+    u0 = f(grid.x[left_ind:right_ind],t0)
 
-    #determine if the boundary conditions are homogeneous
-    homo = bc_left.homo and bc_right.homo
-
-    if explicit:
+    if explicit_solver:
         #define du_dt as a function of u and t
-        if homo:
-            A = reform_A(A_sub,A_diag_t,A_sup)
-            b=b_t
-            def du_dt(u,t,p):
-                return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
-        else:
-            def du_dt(u,t,p):
-                A = reform_A(A_sup,A_diag_t(t),A_sub)
-                b = b_t(t)
-                return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
+        def du_dt(u,t,p):
+            A = reform_A(A_sup,A_diag_t(t),A_sub)
+            b = b_t(t)
+            return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
         #ensure stablilty of the time integration
         dt_stable = dx**2/(2*D)
         if not dt:
             #default value of delta_t to ensure stability
             dt = dt_stable
         elif dt > dt_stable:
-            raise ValueError('dt must be smaller or equal to dx^2/(2*D) where dx is granularity of the grid in space')
-        #set up initial conditions
-        u0 = f(grid.x[left_ind:right_ind],t0)
+            raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
         #solve using one-step solver
-        u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = solver)
+        u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
 
-    #else:
-        #t = 
+    else:
+        #choose solver
+        lin_solve = choose_lin_solve(implicit_solver)
+        if not dt:
+            dt = dx**2/(2*D) #choose default dt value ()
+        C = dt * D/dx**2
+        t = discr_t(t0,t_f,dt)
 
+        #initialise solution array
+        u = np.zeros((len(u0),len(t)))
+        u[:,0] = u0
+        u_n = u0
+        for i,t_n in enumerate(t[:-1]):
+            #make diagonals of matrix M = I-CA at time t_n
+            M_diag = 1 - C * A_diag_t(t_n)
+            M_sub = -C * A_sub
+            M_sup = -C * A_sup
+
+            #make vector b at time t_n
+            b = b_t(t_n)
+            #solve for u_n+1 
+            u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,u_n + C*b)
+            u[:,i+1] = u_n_plus_1
+            u_n = u_n_plus_1
 
 
     #add boundary conditions to solution for Dirichlet boundary conditions
-    #TODO: ask if it slows stuff down to make constant bcs into functions instead of using if statements
     u = bc_left.add_left(u,t)
     u = bc_right.add_right(u,t)
     return u, grid.x, t
@@ -679,4 +683,17 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = False ,ex
 
 
 
-# %%
+
+
+
+
+# %% Plotting Modules
+def plot_3D_sol(u,x,t):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    X, T = np.meshgrid(x, t)
+    ax.plot_surface(X, T, u.T, cmap='viridis')
+    ax.set_xlabel('x')
+    ax.set_ylabel('t')
+    ax.set_zlabel('u')
+    plt.show()
