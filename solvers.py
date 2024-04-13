@@ -37,19 +37,19 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     if total_time < 2*delta_max:
         print("The duration of the integration is shorther than delta max")
         return np.array([x0]),t0
-    no_timesteps = int(np.ceil(total_time/delta_max))
 
     #initialise t and x arrays
-    t = np.zeros(no_timesteps+1) #plus 1 so we include t0 and t_f
+    t = np.arange(t0,t_f,delta_max) #plus 1 so we include t0 and t_f
     t[0] = t0
-    x = np.zeros((len(x0),no_timesteps+1))
-    x[:,0] = x0
-
-    x_n,t_n=x0,t0
-    for i in range(1,no_timesteps+1):
+    t = np.append(t,t_f)
+    x = np.zeros((len(x0),len(t)))
+    h = delta_max
+    x_n = x0
+    for i,t_n in enumerate(t):
         #iterate through functions, computing the next value for each state variable
-        h = min(delta_max, t_f - t_n) #adapts the final h to give the solution at exactly t_final
-        x_n,t_n = solve_step(f,x_n,t_n,h)
+            if t_n == t_f:
+                h = t_n - t[-2] #adapts the final h to give the solution at exactly t_final
+        x_n = solve_step(f,x_n,t_n,h)
         x[:,i] = x_n
         t[i] = t_n
     return x,t
@@ -96,7 +96,7 @@ def euler_step(f,x_n,t_n,h):
         t_n_plus_1 (float): updated value of time after euler step
     """
     x_n_plus_1 = x_n + h*f(x_n,t_n)
-    return x_n_plus_1,t_n+h
+    return x_n_plus_1
 
 def rk4_step(f,x_n,t_n,h):
     """
@@ -116,7 +116,7 @@ def rk4_step(f,x_n,t_n,h):
     k3 = f(x_n + h*k2/2,t_n + h/2)
     k4 = f(x_n + h*k3,t_n + h)
     x_n_plus_1 = x_n + h/6*(k1+2*k2+2*k3+k4)
-    return x_n_plus_1,t_n + h
+    return x_n_plus_1
 
 
 
@@ -458,6 +458,8 @@ def construct_A_diags_b(grid, bc_left, bc_right):
             return b_t
         return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
 
+def reform_A(A_sub,A_diag,A_sup):
+    return np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
 def lin_solve_numpy(A_sub,A_diag,A_sup,b):
@@ -472,7 +474,7 @@ def lin_solve_numpy(A_sub,A_diag,A_sup,b):
         u (np array): solution to the system of equations
     """
     #construct matrix A
-    A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    A = reform_A(A_sub,A_diag,A_sup)
     #solve for u
     u = np.linalg.solve(A,b)
     return u
@@ -489,7 +491,7 @@ def lin_solve_scipy(A_sub,A_diag,A_sup,b):
         u (np array): solution to the system of equations
     """
     #construct matrix A
-    A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+    A = reform_A(A_sub,A_diag,A_sup)
     #solve for u
     f = lambda u: A@u - b
     result = opt.root(f,np.zeros(len(b)))
@@ -598,7 +600,7 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
         #solve for u using Newton's method
         for i in range(max_iter):
             #form matrix A
-            A = np.diag(A_sup,1) + np.diag(A_diag,0) + np.diag(A_sub,-1)
+            A = reform_A(A_sub,A_diag,A_sup)
             #compute discretised residual
             F = A@u + b + dx**2/D * q(u,grid.x[left_ind:right_ind], p)
             #define Jacobian of the system
@@ -620,33 +622,47 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
     return u, grid.x
 
 
-def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, solver = 'RK4'):
+def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = False ,explicit = True ,solver = 'RK4'):
     #discretise in space
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
+
     #find diagonals of matrix A and vector b given boundary conditions
     A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
-    #define du_dt as a function of u and t
-    def du_dt(u,t,p):
-        #TODO add non-linear source term
-        if callable(A_diag_t):
-            A = np.diag(A_sup,1) + np.diag(A_diag_t(t),0) + np.diag(A_sub,-1)
-            b = b_t(t)
+
+    #determine if the boundary conditions are homogeneous
+    homo = bc_left.homo and bc_right.homo
+
+    if explicit:
+        #define du_dt as a function of u and t
+        if homo:
+            A = reform_A(A_sub,A_diag_t,A_sup)
+            b=b_t
+            def du_dt(u,t,p):
+                return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
         else:
-            A = np.diag(A_sup,1) + np.diag(A_diag_t,0) + np.diag(A_sub,-1)
-            b = b_t
-        return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
-    
-    #ensure stablilty of the time integration
-    dt = dx**2/(4*D)
-    #set up initial conditions
-    u0 = f(grid.x[left_ind:right_ind],t0)
-    
-    #solve using one-step solver
-    u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = solver)
+            def du_dt(u,t,p):
+                A = reform_A(A_sup,A_diag_t(t),A_sub)
+                b = b_t(t)
+                return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
+        #ensure stablilty of the time integration
+        dt_stable = dx**2/(2*D)
+        if not dt:
+            #default value of delta_t to ensure stability
+            dt = dt_stable
+        elif dt > dt_stable:
+            raise ValueError('dt must be smaller or equal to dx^2/(2*D) where dx is granularity of the grid in space')
+        #set up initial conditions
+        u0 = f(grid.x[left_ind:right_ind],t0)
+        #solve using one-step solver
+        u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = solver)
+
+    else:
+        t = 
+
+
 
     #add boundary conditions to solution for Dirichlet boundary conditions
-
     #TODO: ask if it slows stuff down to make constant bcs into functions instead of using if statements
     u = bc_left.add_left(u,t)
     u = bc_right.add_right(u,t)
