@@ -586,12 +586,12 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
         else:
             u = u_innit[left_ind:right_ind]
 
-        #define Jacobian of source term
         if dq_du is None:
             #finite difference approximation for dq_du
             eps = 1e-6
             dq_du = lambda u, x, p: (q(u + eps, x, p) - q(u - eps, x, p)) / (2 * eps)
-
+        
+        #define Jacobian of source term
         J_q = np.diag(dq_du(u,grid.x[left_ind:right_ind], p))
         #solve for u using Newton's method
         for i in range(max_iter):
@@ -658,15 +658,16 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
         u[:,0] = u0
         u_n = u0
         for i,t_n in enumerate(t[:-1]):
-            #make diagonals of matrix M = I-CA at time t_n
+            #construct diagonals of matrix M = I-CA at time t_n
             M_diag = 1 - C * A_diag_t(t_n)
             M_sub = -C * A_sub
             M_sup = -C * A_sup
 
-            #make vector b at time t_n
-            b = b_t(t_n)
+            #construct vector d = u + C*b + dt *q at time t_n
+            d = u_n + C*b_t(t_n)+ dt *q(u,grid.x[left_ind:right_ind],t,p)
+
             #solve for u_n+1 
-            u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,u_n + C*b)
+            u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
             u[:,i+1] = u_n_plus_1
             u_n = u_n_plus_1
 

@@ -89,20 +89,40 @@ class Test_Poisson_Solve(unittest.TestCase):
 
     def test_Poisson_Solve_nonlin(self):
         #test Poisson solver for non-linear source term, Dirichlet BCs and numpy linalg solver
-        a = 0
-        b = 1
-        alpha = -1.5
-        beta = 3
+        a,b = 0,1
+        alpha,beta = 0,0
         D = 1
-        p = 1
-        N = 10000
-        f = lambda x,p: np.zeros(len(x)) + p
+        N = 100
+        p = 0.1
+        q = lambda u,x,p : np.exp(p * u)
+        dq_du = lambda u,x,p : p * np.exp(p * u)
+        innit_guess = np.ones(N+1)
         bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
         bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
         solver = 'thomas'
-        analytical = lambda x,p: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
-        u, x = solvers.poisson_solve(bc_left,bc_right,f,p,N,solver = solver)
-        u_anal = analytical(x,0)
-        self.assertAlmostEqual(np.linalg.norm(u-u_anal),0)
+        u, x = solvers.poisson_solve(bc_left,bc_right,q, p, N, D=D,u_innit=innit_guess, tol = 10-10, solver = solver)
+
+        analytical = lambda x: -1/(2*D) * (x-a)*(x-b) + (beta - alpha)/(b-a) * (x-a) + alpha
+        u_anal = analytical(x)
+        self.assertAlmostEqual(np.linalg.norm(u-u_anal),0,places=1)
+    
+    def test_diffusion_solve_lin_implicit(self):
+        #test diffusion solver for linear source term, Dirichlet BCs 
+        a,b = 0,1
+        alpha,beta = 0,0
+        D = 0.1
+        N = 1000
+        dt = 0.001
+        t0 = 0
+        t_f = 2
+        bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
+        bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
+        grid = solvers.Grid(N,bc_left.x,bc_right.x)
+        dx = grid.dx
+        f = lambda x,t: np.sin(math.pi*x)
+        q = lambda u,x,t,p: np.zeros(len(x))
+        p = np.nan
+        u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f,q , p, N,D = D, explicit_solver = False,implicit_solver='thomas', dt = dt)
+        self.assertAlmostEqual(u[500,-1], np.exp(-0.2*math.pi**2),places=3)
 if __name__ == '__main__':
     unittest.main()
