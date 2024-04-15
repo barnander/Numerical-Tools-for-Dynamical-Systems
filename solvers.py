@@ -173,7 +173,7 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
 
 
 
-def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 100, LC = True):
+def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-2, n = 100, LC = True):
     """
     Performs natural parameter continuation on system of ODEs
     Parameters:
@@ -197,7 +197,9 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-3, n = 100, LC = True):
 
     #define root finder (depending on wether we're looking for LCs or not)
     if LC:
-        solve_func = lambda x_T,p: shoot_solve(ode,p,x_T,delta_max)
+        def solve_func(x_T,p):
+            x,T = shoot_solve(ode,p,x_T,delta_max)
+            return np.append(x,T)
     else:
         solve_func = lambda x_T,p: opt.fsolve(ode,x_T,args =(np.nan,p))
     #iterate through parameters
@@ -689,6 +691,11 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
 
 
 # %% Plotting Modules
+def plot_3D_p_cont_LC(x_T,ps,n,delta_t):
+    x0 = x_T
+    for i in range(p.shape[1]):
+
+
 def plot_3D_sol(u,x,t):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
