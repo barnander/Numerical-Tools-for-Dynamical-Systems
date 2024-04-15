@@ -1,5 +1,6 @@
 #%% Packages
 import numpy as np
+import scipy
 import scipy.optimize as opt
 import inspect
 import matplotlib.pyplot as plt
@@ -458,12 +459,16 @@ def reform_A(A_sub,A_diag,A_sup):
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
 def choose_lin_solve(solver_name):
+    print('hey')
+    print(solver_name)
     if solver_name == 'solve':
         return lin_solve_numpy
     elif solver_name == 'root':
         return lin_solve_scipy
     elif solver_name == 'thomas':
         return lin_solve_thomas
+    elif solver_name == 'sparse':
+        return lin_solve_sparse
     else:
         raise ValueError("Unsupported solver: {}".format(solver_name))
 def lin_solve_numpy(A_sub,A_diag,A_sup,b):
@@ -534,8 +539,23 @@ def lin_solve_thomas(A_sub, A_diag, A_sup, b):
         u[i] = d[i] - c[i]*u[i+1]
     return u
 
-
-
+def lin_solve_sparse(A_sub, A_diag, A_sup, b):
+    """
+    Solves a tridiagonal system of equations using sparse matrices.
+    Parameters:
+        A_sub (np array): subdiagonal of the matrix A
+        A_diag (np array): diagonal of the matrix A
+        A_sup (np array): superdiagonal of the matrix A
+        b (np array): vector b in the system of equations Ax = b
+    Returns:
+        u (np array): solution to the system of equations
+    """
+    N = len(b)
+    #construct matrix A
+    A = scipy.sparse.diags([A_sub, A_diag, A_sup], [-1, 0, 1], shape=(N, N), format='csc')
+    #solve for u
+    u = scipy.sparse.linalg.spsolve(A, b)
+    return u
 
 def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
     """
@@ -631,23 +651,7 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
     #set up u0
     u0 = f(grid.x[left_ind:right_ind],t0)
 
-    if explicit_solver:
-        #define du_dt as a function of u and t
-        def du_dt(u,t,p):
-            A = reform_A(A_sup,A_diag_t(t),A_sub)
-            b = b_t(t)
-            return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
-        #ensure stablilty of the time integration
-        dt_stable = dx**2/(2*D)
-        if not dt:
-            #default value of delta_t to ensure stability
-            dt = dt_stable
-        elif dt > dt_stable:
-            raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
-        #solve using one-step solver
-        u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
-
-    else:
+    if implicit_solver:
         #choose solver
         lin_solve = choose_lin_solve(implicit_solver)
         if not dt:
@@ -674,6 +678,23 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
             u_n = u_n_plus_1
 
 
+    else:
+        #define du_dt as a function of u and t
+        def du_dt(u,t,p):
+            A = reform_A(A_sup,A_diag_t(t),A_sub)
+            b = b_t(t)
+            return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
+        #ensure stablilty of the time integration
+        dt_stable = dx**2/(2*D)
+        if not dt:
+            #default value of delta_t to ensure stability
+            dt = dt_stable
+        elif dt > dt_stable:
+            raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
+        #solve using one-step solver
+        u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
+
+
     #add boundary conditions to solution for Dirichlet boundary conditions
     u = bc_left.add_left(u,t)
     u = bc_right.add_right(u,t)
@@ -691,11 +712,6 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
 
 
 # %% Plotting Modules
-def plot_3D_p_cont_LC(x_T,ps,n,delta_t):
-    x0 = x_T
-    for i in range(p.shape[1]):
-
-
 def plot_3D_sol(u,x,t):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
