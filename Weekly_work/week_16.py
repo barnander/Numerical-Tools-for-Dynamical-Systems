@@ -3,6 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import optimize as opt
 from math import nan
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import solvers
 import ODEs
 from ipywidgets import interact
@@ -67,14 +70,14 @@ b0 =0.35
 #p0 = np.array([a,b0,d])
 #pend = np.array([a,bend,d])
 
-p0 = np.array([3.])
+p0 = np.array([0.5])
 pend = np.array([-1.])
 
 x_T0 = np.array([0.2])
 delta_max = 1e-3
 
 #x,betas = solvers.natural_p_cont(Alg_Cubic,p0,pend,x_T0,delta_max,LC = False)
-x,ps = solvers.pseudo_arc(ODEs.Pitchfork_Super,x_T0,p0,pend,0,innit_h=10**-6)
+x,T,ps = solvers.pseudo_arc(ODEs.Pitchfork_Super,p0,pend,0,3, max_it=15,LC = False, innit_h = 0.1)
 
 # %% plot distance from equilibrium against p
 eqm =np.tile(0.27015621,(2,25))

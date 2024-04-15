@@ -124,9 +124,38 @@ def rk4_step(f,x_n,t_n,h):
     x_n_plus_1 = x_n + h/6*(k1+2*k2+2*k3+k4)
     return x_n_plus_1
 
+def LC_residual(ode,p,x_T0, delta_max = 1e-3):
+    """
+    Computes the residual of the limit cycle problem
+    Parameters:
+        ode (function): function of x (np array), t (float), and p (np array) describing system of odes
+        p (np array): parameters of system of equations
+        x0 (np array): point on the LC
+        T (float): period of the LC
+        delta_max (float): max step size
+    Returns:
+        res (np array): array of residuals of the limit cycle problem
+    """
+    x,_ = solve_to(ode,p,x_T0[:-1],0,x_T0[-1],delta_max)
+    res = x[:,-1] - x[:,0]
+    return res
+
+def default_pc(ode,p,x_T):
+    """
+    Default phase condition for numerical shooting
+    Parameters:
+        ode (function): function of x (np array), t (float), and p (np array) describing system of odes
+        p (np array): parameters of system of equations
+        x (np array): point on the LC
+        t (float): time
+    Returns:
+        res (np array): array of residuals of the phase condition
+    """
+    x = x_T[:-1]
+    return ode(x,0,p)[0]
 
 
-def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
+def shoot_solve(f_gen,p,x0,T0, delta_max,solver = 'RK4',phase_cond=default_pc):
     """
     Finds limit cycles (LC) using  numerical shooting (potentially generalise to all BVPs later)
     Parameters:
@@ -142,12 +171,7 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
         T (float): period of the Limit Cycle
     """
     p,_ = param_assert(p)
-    if not phase_cond:
-        #define default phase condition
-        def pc(x,t,p):
-            return f_gen(x,0,p)[0]
-    else:
-        pc = phase_cond
+
     
     #define function to root solve using  newton solver for limit cycles
     def g(x_T0):
@@ -157,24 +181,19 @@ def shoot_solve(f_gen,p,init_guess, delta_max,solver = 'RK4',phase_cond=False):
         Returns:
             root_solve (np array): array of residuals of the root finding problem
         """
-        x0,T = x_T0[:-1],x_T0[-1]
-        x,_ = solve_to(f_gen,p,x0,0,T,delta_max,solver)
-        xf = x[:,-1]
-        BC = xf-x0
-        PC = pc(x0,T,p)
-        root_solve = np.append(BC,PC)
-        return root_solve
-
-    
+        BC = LC_residual(f_gen,p,x_T0,delta_max)
+        PC = phase_cond(f_gen,p,x_T0)
+        res = np.append(BC,PC)
+        return res
     #run scipy newton root-finder on g with initial guess
-    x_T_solved = opt.fsolve(g,init_guess,xtol=delta_max*1.1) #make sure rootfinder tol is higher than integrator tol to avoid numerical issues
+    x_T_solved = opt.fsolve(g,np.append(x0,T0),xtol=delta_max*1.1) #make sure rootfinder tol is higher than integrator tol to avoid numerical issues
     x = x_T_solved[:-1]
     T = x_T_solved[-1]
     return x, T
 
 
 
-def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-2, n = 100, LC = True):
+def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 25, LC = False):
     """
     Performs natural parameter continuation on system of ODEs
     Parameters:
@@ -182,7 +201,7 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-2, n = 100, LC = True):
         p0 (np array): initial parameter value(s)
         pend (np array): final parameter value(s)
         x_T0 (np array): initial guess for the system (include initial period guess for LCs as last element of the array)
-        delta_max (float): max step size
+        delta_max (float): max step size of the numerical solver
         n (int): number of steps in the parameter continuation
         LC  (bool): if False, only equilibrium solutions are computed (not Limit Cycles)
     Returns: 
@@ -193,29 +212,33 @@ def natural_p_cont(ode, p0, pend, x_T0, delta_max = 1e-2, n = 100, LC = True):
     #check that p0 and pend are the same type, length and that only one parameter changes:
     p0,pend = param_assert(p0,pend)
     #initialise parameter array and solution array
+    x_T = np.zeros((np.size(x0)+1,n))
     ps = np.linspace(p0,pend,n)
-    x_T = np.tile(np.nan,(np.size(x_T0),n))
-
     #define root finder (depending on wether we're looking for LCs or not)
     if LC:
         def solve_func(x_T,p):
-            x,T = shoot_solve(ode,p,x_T,delta_max)
-            return np.append(x,T)
+            res = np.append(LC_residual(ode,p,x_T,delta_max),default_pc(ode,p,x_T))
+            return res
+        
     else:
-        solve_func = lambda x_T,p: opt.fsolve(ode,x_T,args =(np.nan,p))
+        def solve_func(x_T,p):
+            return np.append(ode(x_T[:-1],0,p),0)
+
+    x_T0 = np.append(x0,T0)
     #iterate through parameters
     for i,p in enumerate(ps):
         #find equilibria/LCs
-        x_Ti = solve_func(x_T0,p)
+        x_Ti = opt.fsolve(solve_func,x_T0,args = (p))
         #add result to results array
         x_T[:,i] = x_Ti
         #update initial guess for next iteration
         x_T0 = x_Ti
     #add finall value 
-    x_T[:,-1] = x_Ti
-    return x_T,ps.transpose()
+    x_T[:,i] = x_Ti
+    x,T = x_T[:-1,:],x_T[-1,:]
+    return x,T,ps.transpose()
 
-def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
+def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, fixed_point):
     """
     Performs one step of pseudo-arclength continuation on system of ODEs.
     Parameters:
@@ -230,8 +253,6 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
         x_T2 (np array): value of fixed point of the system (includes initial period guess for LCs as last element of the array) at step i+1
         p2 (np array): parameter value(s) at step i+1
     """
-    #TODO: include in same func as natural param cont    
-    #TODO make it work with multiple parameters and with LC finder
 
     #form augmented state vectors
     v0 = np.append(p0[p_ind],x_T0)
@@ -241,17 +262,13 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
     delta = v1 - v0
     v_pred = v1 + delta
     #define function to solve
-    if LC:
-        #TODO: add LC solver
-        basil = 5
-    else:
-        def root_solve(v2):
-            p2 = p1.copy()
-            p2[p_ind] = v2[0]
-            pseudo_cond = np.dot(v2 - v_pred, delta)
-            eqm_cond = ode(v2[1:], np.nan, p2)
-            residuals = np.append(pseudo_cond,eqm_cond)
-            return residuals
+    def root_solve(v2):
+        p2 = p1.copy()
+        p2[p_ind] = v2[0]
+        pseudo_cond = np.dot(v2 - v_pred, delta)
+        fixed_point_cond = fixed_point(v2[1:],p2)
+        residuals = np.append(pseudo_cond,fixed_point_cond)
+        return residuals
     
     #find v2 using fsolve
     v2 = opt.fsolve(root_solve,v1)
@@ -264,7 +281,7 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, LC = False):
 
 
 
-def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
+def pseudo_arc(ode,p0,pend,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True):
     """
     Performs pseudo-arclength continuation on system of ODEs.
     Parameters:
@@ -281,15 +298,26 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     p0,pend = param_assert(p0,pend)
     assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
 
-    #find X_T0
-    x_T0 = opt.fsolve(lambda x: ode(x,np.nan,p0),x_T0)
+    #define function for fixed points
+    if LC:
+        def solve_func(x_T,p):
+            res = np.append(LC_residual(ode,p,x_T),default_pc(ode,p,x_T))
+            return res
+        
+    else:
+        def solve_func(x_T,p):
+            return np.append(ode(x_T[:-1],0,p),0)
+    
+    #find first fixed point using initial guess
+    x_T0 = opt.fsolve(solve_func,np.append(x0,T0), args = (p0))
 
     #find out wether we increase or decrease the parameter.
     direction = np.sign(pend[p_ind]-p0[p_ind])
     #do a step of natural parameter continuation to find v1
     p1 = p0.copy()
     p1[p_ind] = p0[p_ind] + direction * innit_h #making sure to take a step in the direction of pend
-    x_T1 = opt.fsolve(lambda x: ode(x,np.nan,p1),x_T0)
+    
+    x_T1 = opt.fsolve(solve_func,x_T0, args = (p1))
 
     #initialise array of solutions
     x_T = np.tile(np.nan,(np.size(x_T0),int(max_it)+2))
@@ -300,8 +328,9 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
     ps[:,0] = p0
     ps[:,1] = p1
     for i in range(int(max_it)):
+        print(i)
         #take a step of pseudo-arclength continuation and add to solutions array
-        x_T2,p2 = pseudo_arc_step(ode,x_T0,p0,x_T1,p1,p_ind=p_ind)
+        x_T2,p2 = pseudo_arc_step(ode,x_T0,p0,x_T1,p1,p_ind, solve_func)
         x_T[:,i+2] = x_T2
         ps[:,i+2] = p2
 
@@ -315,7 +344,7 @@ def pseudo_arc(ode,x_T0,p0,pend,p_ind,max_it = 1e3 ,innit_h= 1e-3):
         p0 = p1
         p1 = p2
     print("Max iterations reached")
-    return x_T,ps
+    return x_T[:-1,:],x_T[-1,:],ps
 
 class Boundary_Condition():
     def __init__(self, BC_type, x, value):
@@ -459,8 +488,6 @@ def reform_A(A_sub,A_diag,A_sup):
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
 def choose_lin_solve(solver_name):
-    print('hey')
-    print(solver_name)
     if solver_name == 'solve':
         return lin_solve_numpy
     elif solver_name == 'root':
@@ -586,7 +613,7 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
     A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
     A_diag,b = A_diag_func(np.nan), b_func(np.nan)
     #choose solver
-    #TODO: add Newton's method
+
     lin_solve = choose_lin_solve(solver)
     
     #find number of arguments to q to determine if the source term is linear or non-linear
