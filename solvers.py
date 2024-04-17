@@ -57,7 +57,6 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
 
 def discr_t(t0,t_f,delta_max):
     t = np.arange(t0,t_f,delta_max) 
-    t[0] = t0
     t = np.append(t,t_f)
     return t
 
@@ -193,7 +192,7 @@ def shoot_solve(f_gen,p,x0,T0, delta_max,solver = 'RK4',phase_cond=default_pc):
 
 
 
-def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 25, LC = False):
+def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 200, LC = False):
     """
     Performs natural parameter continuation on system of ODEs
     Parameters:
@@ -227,6 +226,7 @@ def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 25, LC = Fa
     x_T0 = np.append(x0,T0)
     #iterate through parameters
     for i,p in enumerate(ps):
+        print(i)
         #find equilibria/LCs
         x_Ti = opt.fsolve(solve_func,x_T0,args = (p))
         #add result to results array
@@ -293,7 +293,6 @@ def pseudo_arc(ode,p0,pend,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True):
         max_it (int): maximum number of iterations
         innit_h (float): initial step size
     """
-    #TODO add LC solver
     #check that p0 and pend are the same type, length and that only one parameter changes:
     p0,pend = param_assert(p0,pend)
     assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
@@ -591,7 +590,7 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
         bc_left (Boundary_Condition): left boundary condition
         bc_right (Boundary_Condition): right boundary condition
         N (int): number of grid points
-        q (function): source term, function of x, (u) and p
+        q (function): source term, function of (u), x, and p
         p (np array): parameter(s) of the source term
         D (float): diffusion coefficient
         u_innit (np array): initial guess for the solution
@@ -674,7 +673,6 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
 
     #find diagonals of matrix A and vector b given boundary conditions
     A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
-    
     #set up u0
     u0 = f(grid.x[left_ind:right_ind],t0)
 
@@ -683,9 +681,8 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
         lin_solve = choose_lin_solve(implicit_solver)
         if not dt:
             dt = dx**2/(2*D) #choose default dt value ()
-        C = dt * D/dx**2
+        C = (dt* D)/(dx**2)
         t = discr_t(t0,t_f,dt)
-
         #initialise solution array
         u = np.zeros((len(u0),len(t)))
         u[:,0] = u0
@@ -698,7 +695,6 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
 
             #construct vector d = u + C*b + dt *q at time t_n
             d = u_n + C*b_t(t_n)+ dt *q(u,grid.x[left_ind:right_ind],t,p)
-
             #solve for u_n+1 
             u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
             u[:,i+1] = u_n_plus_1
@@ -708,9 +704,9 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
     else:
         #define du_dt as a function of u and t
         def du_dt(u,t,p):
-            A = reform_A(A_sup,A_diag_t(t),A_sub)
+            A = reform_A(A_sub,A_diag_t(t),A_sup)
             b = b_t(t)
-            return D/dx**2 * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
+            return (D/dx**2) * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
         #ensure stablilty of the time integration
         dt_stable = dx**2/(2*D)
         if not dt:
@@ -720,13 +716,10 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
             raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
         #solve using one-step solver
         u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
-
-
     #add boundary conditions to solution for Dirichlet boundary conditions
     u = bc_left.add_left(u,t)
     u = bc_right.add_right(u,t)
     return u, grid.x, t
-
 
 
 

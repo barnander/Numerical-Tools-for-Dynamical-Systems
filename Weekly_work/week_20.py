@@ -28,13 +28,14 @@ f = lambda x,t: np.sin(m*pi * (x-a)/(b-a))
 
 
 N = 100
-bc_left = solvers.Boundary_Condition("Dirichlet",a,alpha)
-bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
+
 
 #analytic derivative
 du_dx = lambda x,t: np.exp(-m**2*D*pi**2 * t/(b-a)**2) * m*pi/(b-a) * np.cos(m*pi * (x-a)/(b-a))
+bc_left = solvers.Boundary_Condition("Neumann",a,lambda t: du_dx(a,t))
+bc_right = solvers.Boundary_Condition("Dirichlet",b,beta)
 
-u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f,q , p, N,D = D, explicit_solver=False, implicit_solver='sparse') 
+u,x,t = solvers.diffusion_solve(bc_left, bc_right, f,t0,t_f,q , p, N,D = D, explicit_solver= "RK4")
 
 def anal_u(x,t):
     x_vec = np.sin(m*pi * (x-a)/(b-a))
