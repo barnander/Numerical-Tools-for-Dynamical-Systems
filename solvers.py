@@ -226,7 +226,6 @@ def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 200, LC = F
     x_T0 = np.append(x0,T0)
     #iterate through parameters
     for i,p in enumerate(ps):
-        print(i)
         #find equilibria/LCs
         x_Ti = opt.fsolve(solve_func,x_T0,args = (p))
         #add result to results array
@@ -238,7 +237,7 @@ def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 200, LC = F
     x,T = x_T[:-1,:],x_T[-1,:]
     return x,T,ps.transpose()
 
-def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, fixed_point):
+def pseudo_arc_step(fixed_point, v0,v1,p_sol,p_ind,delta_max):
     """
     Performs one step of pseudo-arclength continuation on system of ODEs.
     Parameters:
@@ -254,34 +253,24 @@ def pseudo_arc_step(ode, x_T0, p0, x_T1, p1,p_ind, fixed_point):
         p2 (np array): parameter value(s) at step i+1
     """
 
-    #form augmented state vectors
-    v0 = np.append(p0[p_ind],x_T0)
-    v1 = np.append(p1[p_ind],x_T1)
-
     #find the delta and predict v2
     delta = v1 - v0
     v_pred = v1 + delta
     #define function to solve
     def root_solve(v2):
-        p2 = p1.copy()
-        p2[p_ind] = v2[0]
+        p_sol[p_ind] = v2[0]
         pseudo_cond = np.dot(v2 - v_pred, delta)
-        fixed_point_cond = fixed_point(v2[1:],p2)
+        fixed_point_cond = fixed_point(v2[1:],p_sol)
         residuals = np.append(pseudo_cond,fixed_point_cond)
         return residuals
     
     #find v2 using fsolve
-    v2 = opt.fsolve(root_solve,v1)
-
-    #reform variable and parameter arrays
-    x_T2 = v2[1:]
-    p2 = p1.copy()
-    p2[p_ind] = v2[0]
-    return x_T2,p2
+    v2 = opt.fsolve(root_solve,v1,xtol=1.1 * delta_max)
+    return v2
 
 
 
-def pseudo_arc(ode,p0,pend,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True):
+def pseudo_arc(ode,p0,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True, delta_max = 1e-3):
     """
     Performs pseudo-arclength continuation on system of ODEs.
     Parameters:
@@ -293,14 +282,11 @@ def pseudo_arc(ode,p0,pend,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True):
         max_it (int): maximum number of iterations
         innit_h (float): initial step size
     """
-    #check that p0 and pend are the same type, length and that only one parameter changes:
-    p0,pend = param_assert(p0,pend)
-    assert np.count_nonzero(pend - p0) == 1, "only one parameter should change"
 
     #define function for fixed points
     if LC:
         def solve_func(x_T,p):
-            res = np.append(LC_residual(ode,p,x_T),default_pc(ode,p,x_T))
+            res = np.append(LC_residual(ode,p,x_T,delta_max = delta_max),default_pc(ode,p,x_T))
             return res
         
     else:
@@ -309,39 +295,37 @@ def pseudo_arc(ode,p0,pend,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True):
     
     #find first fixed point using initial guess
     x_T0 = opt.fsolve(solve_func,np.append(x0,T0), args = (p0))
-
-    #find out wether we increase or decrease the parameter.
-    direction = np.sign(pend[p_ind]-p0[p_ind])
+    p0,_ = param_assert(p0)
     #do a step of natural parameter continuation to find v1
     p1 = p0.copy()
-    p1[p_ind] = p0[p_ind] + direction * innit_h #making sure to take a step in the direction of pend
+    p1[p_ind] = p0[p_ind] + innit_h 
     
     x_T1 = opt.fsolve(solve_func,x_T0, args = (p1))
 
     #initialise array of solutions
-    x_T = np.tile(np.nan,(np.size(x_T0),int(max_it)+2))
-    ps = np.tile(np.nan,(np.size(p0),int(max_it)+2))
+    x_T = np.zeros((len(x_T0),int(max_it)+2))
+    ps = np.zeros((len(p0),int(max_it)+2))
     #and add values for v0 and v1
     x_T[:,0] = x_T0
     x_T[:,1] = x_T1
     ps[:,0] = p0
     ps[:,1] = p1
+
+    v0 = np.append(p0[p_ind],x_T0)
+    v1 = np.append(p1[p_ind],x_T1)
+    p_sol = p0.copy()
+
     for i in range(int(max_it)):
         print(i)
         #take a step of pseudo-arclength continuation and add to solutions array
-        x_T2,p2 = pseudo_arc_step(ode,x_T0,p0,x_T1,p1,p_ind, solve_func)
-        x_T[:,i+2] = x_T2
-        ps[:,i+2] = p2
+        v2 = pseudo_arc_step(solve_func,v0,v1,p_sol,p_ind,delta_max)
+        x_T[:,i+2] = v2[1:]
+        p_sol[p_ind] = v2[0]
+        ps[:,i+2] = p_sol
 
-        #check if we have reached the end of the continuation
-        if direction * p2[p_ind] > direction * pend[p_ind]:
-            print(f"Reached end of continuation after {i} iterations")
-            return x_T[:,:i+3], ps[:,:i+3]
         #update values for v0 and v1 for next iteration
-        x_T0 = x_T1
-        x_T1 = x_T2
-        p0 = p1
-        p1 = p2
+        v0 = v1.copy()
+        v1 = v2
     print("Max iterations reached")
     return x_T[:-1,:],x_T[-1,:],ps
 
@@ -416,7 +400,18 @@ class Grid():
         self.dx = (b-a)/N
         self.x = np.linspace(a,b,N+1)
 
-def construct_A_diags_b(grid, bc_left, bc_right):
+def construct_A_diags_b_first(grid, bc_left, bc_right):
+    N = grid.N
+    dx = grid.dx
+    A_sub = -np.ones(N-2)
+    A_diag = np.zeros(N-1)
+    A_sup = np.ones(N-2)
+    b = np.zeros(N-1)
+    b[0] = -bc_left.value(np.nan)
+    b[-1] = bc_right.value(np.nan)
+    return A_sub, A_diag, A_sup, b
+
+def construct_A_diags_b_second(grid, bc_left, bc_right):
     """
     Constructs the diagonals of tridiagonal matrix A and the vector b for the Poisson equation given the grid and boundary conditions.
     Parameters:
@@ -578,12 +573,12 @@ def lin_solve_sparse(A_sub, A_diag, A_sup, b):
     """
     N = len(b)
     #construct matrix A
-    A = scipy.sparse.diags([A_sub, A_diag, A_sup], [-1, 0, 1], shape=(N, N), format='csc')
+    A = scipy.sparse.diags([A_sub, A_diag, A_sup], [-1, 0, 1], format='csc')
     #solve for u
     u = scipy.sparse.linalg.spsolve(A, b)
     return u
 
-def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve'):
+def second_order_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve',P = 0):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -609,10 +604,16 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
 
     # find diagonals of matrix A and vector b given boundary conditions
     #set up variables left_ind and right_ind that determine the first and last grid values used in the solver
-    A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
+    A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b_second(grid, bc_left, bc_right)
     A_diag,b = A_diag_func(np.nan), b_func(np.nan)
-    #choose solver
 
+    #A_sub_first, A_diag_first, A_sup_first, b_first = construct_A_diags_b_first(grid, bc_left, bc_right)
+
+    #make diagonals of matrix A and vector b that encapsulate 1st and second order derivatives
+    #for vecs in [(A_sub,A_deriv_sub),(A_diag,A_deriv_diag),(A_sup,A_deriv_sup),(b,b_deriv)]:
+
+
+    #choose solver
     lin_solve = choose_lin_solve(solver)
     
     #find number of arguments to q to determine if the source term is linear or non-linear
@@ -667,20 +668,40 @@ def poisson_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 
 
 
 def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , explicit_solver = 'RK4' ,implicit_solver = False):
+    """
+    Solves the diffusion equation for given boundary conditions, initial conditions, source term, and diffusion coefficient.
+    Parameters:
+        bc_left (Boundary_Condition): left boundary condition
+        bc_right (Boundary_Condition): right boundary condition
+        f (function): initial condition, function of x and t0
+        t0 (float): initial time
+        t_f (float): final time
+        q (function): source term, function of u, x, t, and p
+        p (np array): parameter(s) of the source term
+        N (int): number of grid points in space
+        D (float): diffusion coefficient
+        dt (float): time step size of the time integration
+        explicit_solver (string): solver used for explicit time integration
+        implicit_solver (string): solver used for implicit time integration (False if explicit solver is used)
+    Returns:
+        u (np array): solution to the diffusion equation
+        grid.x (np array): space grid points
+        t (np array): time grid points 
+    """
     #discretise in space
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
 
     #find diagonals of matrix A and vector b given boundary conditions
-    A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right)
+    A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b_second(grid, bc_left, bc_right)
     #set up u0
     u0 = f(grid.x[left_ind:right_ind],t0)
 
     if implicit_solver:
-        #choose solver
+        #choose linear system solver
         lin_solve = choose_lin_solve(implicit_solver)
         if not dt:
-            dt = dx**2/(2*D) #choose default dt value ()
+            dt = dx**2/(2*D) #choose a default dt value
         C = (dt* D)/(dx**2)
         t = discr_t(t0,t_f,dt)
         #initialise solution array
@@ -688,13 +709,13 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
         u[:,0] = u0
         u_n = u0
         for i,t_n in enumerate(t[:-1]):
+            print(i)
             #construct diagonals of matrix M = I-CA at time t_n
             M_diag = 1 - C * A_diag_t(t_n)
             M_sub = -C * A_sub
             M_sup = -C * A_sup
-
             #construct vector d = u + C*b + dt *q at time t_n
-            d = u_n + C*b_t(t_n)+ dt *q(u,grid.x[left_ind:right_ind],t,p)
+            d = u_n + C*b_t(t_n)+ dt *q(u_n,grid.x[left_ind:right_ind],t,p)
             #solve for u_n+1 
             u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
             u[:,i+1] = u_n_plus_1
@@ -710,7 +731,7 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
         #ensure stablilty of the time integration
         dt_stable = dx**2/(2*D)
         if not dt:
-            #default value of delta_t to ensure stability
+            #default value of dt to ensure stability
             dt = dt_stable
         elif dt > dt_stable:
             raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
