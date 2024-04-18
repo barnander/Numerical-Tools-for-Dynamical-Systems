@@ -282,7 +282,8 @@ def pseudo_arc(ode,p0,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True, delta
         max_it (int): maximum number of iterations
         innit_h (float): initial step size
     """
-
+    #assert that the parameters are of the right type
+    p0,_ = param_assert(p0)
     #define function for fixed points
     if LC:
         def solve_func(x_T,p):
@@ -295,7 +296,6 @@ def pseudo_arc(ode,p0,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True, delta
     
     #find first fixed point using initial guess
     x_T0 = opt.fsolve(solve_func,np.append(x0,T0), args = (p0))
-    p0,_ = param_assert(p0)
     #do a step of natural parameter continuation to find v1
     p1 = p0.copy()
     p1[p_ind] = p0[p_ind] + innit_h 
@@ -316,7 +316,6 @@ def pseudo_arc(ode,p0,p_ind,x0,T0 = 0,max_it = 50  ,innit_h= 1e-3,LC=True, delta
     p_sol = p0.copy()
 
     for i in range(int(max_it)):
-        print(i)
         #take a step of pseudo-arclength continuation and add to solutions array
         v2 = pseudo_arc_step(solve_func,v0,v1,p_sol,p_ind,delta_max)
         x_T[:,i+2] = v2[1:]
@@ -482,9 +481,16 @@ def reform_A(A_sub,A_diag,A_sup):
 
 # Linear System solvers for Poisson equation using arrays of diagonals and b
 def choose_lin_solve(solver_name):
-    if solver_name == 'solve':
+    """
+    Chooses the tridiagonal linear system solver based on the input string.
+    Parameters:
+        solver_name (str): name of the solver
+    Returns:
+        function: the linear solver function (function of the form lin_solve(A_sub, A_diag, A_sup, b))
+    """
+    if solver_name == 'np_solve':
         return lin_solve_numpy
-    elif solver_name == 'root':
+    elif solver_name == 'sp_root':
         return lin_solve_scipy
     elif solver_name == 'thomas':
         return lin_solve_thomas
@@ -578,7 +584,7 @@ def lin_solve_sparse(A_sub, A_diag, A_sup, b):
     u = scipy.sparse.linalg.spsolve(A, b)
     return u
 
-def second_order_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'solve',P = 0):
+def second_order_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'np_solve',P = 0):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -709,7 +715,6 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
         u[:,0] = u0
         u_n = u0
         for i,t_n in enumerate(t[:-1]):
-            print(i)
             #construct diagonals of matrix M = I-CA at time t_n
             M_diag = 1 - C * A_diag_t(t_n)
             M_sub = -C * A_sub
