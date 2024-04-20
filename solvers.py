@@ -478,17 +478,17 @@ def construct_A_diags_b(grid, bc_left, bc_right,D,P):
     def A_diag_func(t):
         A_diag_first_t = np.array([f(t) if callable(f) else f for f in A_diag_first],dtype = np.float64)
         A_diag_second_t = np.array([f(t) if callable(f) else f for f in A_diag_second],dtype = np.float64)
-        A_diag_t = A_diag_second_t + P*dx/(2*D)*A_diag_first_t
+        A_diag_t = (D/dx**2) * A_diag_second_t + P/(2*dx) * A_diag_first_t
         return A_diag_t
     
     def b_func(t):
         b_first_t = np.array([f(t) if callable(f) else f for f in b_first],dtype = np.float64)
         b_second_t = np.array([f(t) if callable(f) else f for f in b_second],dtype = np.float64)
-        b_t = b_second_t + P*dx/(2*D)*b_first_t
+        b_t = (D/dx**2) * b_second_t + P/(2*dx) * b_first_t
         return b_t
     
-    A_sub = A_sub_second + P*dx/(2*D)*A_sub_first
-    A_sup = A_sup_second + P*dx/(2*D)*A_sup_first
+    A_sub = (D/dx**2) * A_sub_second + P/(2*dx)*A_sub_first
+    A_sup = (D/dx**2) * A_sup_second + P/(2*dx)*A_sup_first
     #TODO note that this is not the most efficient way to do this, but it is the most general
     return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
 
@@ -601,8 +601,6 @@ def lin_solve_sparse(A_sub, A_diag, A_sup, b):
     return u
 
 
-
-
 def second_order_solve(bc_left, bc_right,q, p, N, D=1,P = 0, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'np_solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
@@ -643,7 +641,7 @@ def second_order_solve(bc_left, bc_right,q, p, N, D=1,P = 0, u_innit = np.array(
     if n_args == 2:
         #solve linear system using chosen solver
         # define constant vector c
-        c = -b - dx**2/D * q(grid.x[left_ind:right_ind],p)
+        c = -b - q(grid.x[left_ind:right_ind],p)
         #solve linear system of the shape Au = c using chosen solver
         u = lin_solve(A_sub,A_diag,A_sup,c)
 
@@ -668,9 +666,9 @@ def second_order_solve(bc_left, bc_right,q, p, N, D=1,P = 0, u_innit = np.array(
             #form matrix A
             A = reform_A(A_sub,A_diag,A_sup)
             #compute discretised residual
-            F = A@u + b + dx**2/D * q(u,grid.x[left_ind:right_ind], p)
+            F = A@u + b + q(u,grid.x[left_ind:right_ind], p)
             #define Jacobian of the system
-            J_F = A + dx**2/D * J_q
+            J_F = A + J_q
             #extract diagonals of Jacobian
             J_sub, J_diag, J_sup = np.diag(J_F,-1), np.diag(J_F,0), np.diag(J_F,1)
             #solve for correction V using linear solver
@@ -688,9 +686,9 @@ def second_order_solve(bc_left, bc_right,q, p, N, D=1,P = 0, u_innit = np.array(
     return u, grid.x
 
 
-def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None , explicit_solver = 'RK4' ,implicit_solver = False):
+def meth_lines(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None , implicit = True, explicit_solver = 'RK4' ,implicit_solver = 'thomas'):
     """
-    Solves the diffusion equation for given boundary conditions, initial conditions, source term, and diffusion coefficient.
+    Solves PDEs of the form u_t = D*u_xx + P*u_x + q(u,x,t,p) using the method of lines.
     Parameters:
         bc_left (Boundary_Condition): left boundary condition
         bc_right (Boundary_Condition): right boundary condition
@@ -700,10 +698,10 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None 
         q (function): source term, function of u, x, t, and p
         p (np array): parameter(s) of the source term
         N (int): number of grid points in space
-        D (float): diffusion coefficient
-        dt (float): time step size of the time integration
+        D (float): coefficient of the second space derivative term (default is 1)
+        dt (float): time step size of the time integration (default is dx^2/(2*D))
         explicit_solver (string): solver used for explicit time integration
-        implicit_solver (string): solver used for implicit time integration (False if explicit solver is used)
+        implicit_solver (string): solver used for to solve the linear system in implicit euler method
     Returns:
         u (np array): solution to the diffusion equation
         grid.x (np array): space grid points
@@ -721,16 +719,13 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None 
 
     #if a linear solver is specified by the user, 
     #solve the system using the implicit Euler method.
-    if implicit_solver:
+    if implicit:
         #choose linear system solver
         lin_solve = choose_lin_solve(implicit_solver)
         
         #choose a default dt value if not specified
         if not dt:
             dt = dx**2/(2*D) 
-
-        #initialise constant C
-        C = (dt* D)/(dx**2)
 
         #discretise in time
         t = discr_t(t0,t_f,dt)
@@ -740,14 +735,14 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None 
         u[:,0] = u0
         u_n = u0
 
-        #iterate through time, solving the implicit system at each time step for u_n+1
+        #iterate through time, solving the implicit (IMEX) system at each time step for u_n+1
         for i,t_n in enumerate(t[:-1]):
             #construct diagonals of matrix M = I-CA at time t_n
-            M_diag = 1 - C * A_diag_t(t_n)
-            M_sub = -C * A_sub
-            M_sup = -C * A_sup
+            M_diag = 1 - dt * A_diag_t(t_n)
+            M_sub = -dt * A_sub
+            M_sup = -dt * A_sup
             #construct vector d = u + C*b + dt *q at time t_n
-            d = u_n + C*b_t(t_n)+ dt *q(u_n,grid.x[left_ind:right_ind],t,p)
+            d = u_n + dt*b_t(t_n)+ dt *q(u_n,grid.x[left_ind:right_ind],t,p)
             #solve for u_n+1 
             u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
             u[:,i+1] = u_n_plus_1
@@ -760,7 +755,7 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None 
         def du_dt(u,t,p):
             A = reform_A(A_sub,A_diag_t(t),A_sup)
             b = b_t(t)
-            return (D/dx**2) * (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
+            return (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
         #ensure stablilty of the time integration
         dt_stable = dx**2/(2*D)
         if not dt:
