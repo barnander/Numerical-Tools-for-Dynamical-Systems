@@ -237,7 +237,7 @@ def natural_p_cont(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 200, LC = F
     x,T = x_T[:-1,:],x_T[-1,:]
     return x,T,ps.transpose()
 
-def pseudo_arc_step(fixed_point, v0,v1,p_sol,p_ind,delta_max):
+def pseudo_arc_step(residual_func, v0,v1,p_sol,p_ind,delta_max):
     """
     Performs one step of pseudo-arclength continuation on system of ODEs.
     Parameters:
@@ -260,8 +260,8 @@ def pseudo_arc_step(fixed_point, v0,v1,p_sol,p_ind,delta_max):
     def root_solve(v2):
         p_sol[p_ind] = v2[0]
         pseudo_cond = np.dot(v2 - v_pred, delta)
-        fixed_point_cond = fixed_point(v2[1:],p_sol)
-        residuals = np.append(pseudo_cond,fixed_point_cond)
+        func_cond = residual_func(v2[1:],p_sol)
+        residuals = np.append(pseudo_cond,func_cond)
         return residuals
     
     #find v2 using fsolve
@@ -367,8 +367,6 @@ class Boundary_Condition():
         else:
             raise ValueError("Unsupported boundary condition type: {}".format(type(value)))
 
-
-    #TODO try and actually implement this
     def add_left(self,u,t=np.array([None])):
         #Adds left BC values back to grid for Dirichlet BCs
         if self.type == "Dirichlet":
@@ -399,18 +397,8 @@ class Grid():
         self.dx = (b-a)/N
         self.x = np.linspace(a,b,N+1)
 
-def construct_A_diags_b_first(grid, bc_left, bc_right):
-    N = grid.N
-    dx = grid.dx
-    A_sub = -np.ones(N-2)
-    A_diag = np.zeros(N-1)
-    A_sup = np.ones(N-2)
-    b = np.zeros(N-1)
-    b[0] = -bc_left.value(np.nan)
-    b[-1] = bc_right.value(np.nan)
-    return A_sub, A_diag, A_sup, b
 
-def construct_A_diags_b_second(grid, bc_left, bc_right):
+def construct_A_diags_b(grid, bc_left, bc_right,D,P):
     """
     Constructs the diagonals of tridiagonal matrix A and the vector b for the Poisson equation given the grid and boundary conditions.
     Parameters:
@@ -432,15 +420,19 @@ def construct_A_diags_b_second(grid, bc_left, bc_right):
 
 
     #Make general tridiagonal matrix A
-    #superdiagonal
-    A_sup = np.ones(N-2) 
-    #subdiagonal
-    A_sub = np.ones(N-2)
-    #diagonal
-    A_diag = -2*np.ones(N-1, dtype = object)
+    #subdiagonals
+    A_sub_first = -np.ones(N-2)
+    A_sub_second = np.ones(N-2)
+    #diagonals
+    A_diag_first = np.zeros(N-1, dtype= object)
+    A_diag_second = -2*np.ones(N-1, dtype = object)
+    #superdiagonals
+    A_sup_first = np.ones(N-2)
+    A_sup_second = np.ones(N-2) 
 
     #make general vector b
-    b = np.zeros(N-1, dtype= object)
+    b_first = np.zeros(N-1, dtype= object)
+    b_second = np.zeros(N-1, dtype= object)
 
     #initialise left_ind and right_ind for Dirichlet boundary conditions
     left_ind = 1
@@ -448,31 +440,55 @@ def construct_A_diags_b_second(grid, bc_left, bc_right):
 
 
     if bc_left.type == "Dirichlet":
-        b[0] = bc_left.value
+        b_first[0] = lambda t : -bc_left.value(t)
+        b_second[0] = bc_left.value
     else:
-        A_sup = np.append(2,A_sup)
-        A_sub = np.append(1,A_sub)
-        A_diag = np.append(lambda t: -2 * (1 - dx * bc_left.value[1](t)),A_diag)
-        b = np.append(lambda t: -2 * dx * bc_left.value[0](t),b)
+        A_sub_first = np.append(-1,A_sub_first)
+        A_sub_second = np.append(1,A_sub_second)
+
+        A_diag_first = np.append(lambda t: -2*dx*bc_left.value[1](t),A_diag_first)
+        A_diag_second = np.append(lambda t: -2 * (1 - dx * bc_left.value[1](t)),A_diag_second)
+
+        A_sup_first = np.append(0,A_sup_first)
+        A_sup_second = np.append(2,A_sup_second)
+
+        b_first = np.append(lambda t: 2*dx*bc_left.value[0](t),b_first)
+        b_second = np.append(lambda t: -2 * dx * bc_left.value[0](t),b_second)
+
         left_ind = None
 
+
     if bc_right.type == "Dirichlet":
-        b[-1] = bc_right.value
+        b_first[-1] = bc_right.value
+        b_second[-1] = bc_right.value
     else:
-        A_sup = np.append(A_sup,1)
-        A_sub = np.append(A_sub,2)
-        A_diag = np.append(A_diag,lambda t: -2 * (1 + dx * bc_right.value[1](t)) )
-        b = np.append(b,lambda t: 2 * dx * bc_right.value[0](t))
+        A_sub_first = np.append(A_sub_first,0)
+        A_sub_second = np.append(A_sub_second,2)
+
+        A_diag_first = np.append(A_diag_first,lambda t: -2*dx*bc_right.value[1](t))
+        A_diag_second = np.append(A_diag_second,lambda t: -2 * (1 + dx * bc_right.value[1](t)))
+
+        A_sup_first = np.append(A_sup_first,1)
+        A_sup_second = np.append(A_sup_second,1)
+        
+        b_first = np.append(b_first,lambda t: 2*dx* bc_right.value[0](t))
+        b_second = np.append(b_second,lambda t: 2 * dx * bc_right.value[0](t))
         right_ind = None
 
     def A_diag_func(t):
-        A_diag_t = np.array([f(t) if callable(f) else f for f in A_diag],dtype = np.float64)
+        A_diag_first_t = np.array([f(t) if callable(f) else f for f in A_diag_first],dtype = np.float64)
+        A_diag_second_t = np.array([f(t) if callable(f) else f for f in A_diag_second],dtype = np.float64)
+        A_diag_t = A_diag_second_t + P*dx/(2*D)*A_diag_first_t
         return A_diag_t
+    
     def b_func(t):
-        b_t = np.array([f(t) if callable(f) else f for f in b],dtype = np.float64)
+        b_first_t = np.array([f(t) if callable(f) else f for f in b_first],dtype = np.float64)
+        b_second_t = np.array([f(t) if callable(f) else f for f in b_second],dtype = np.float64)
+        b_t = b_second_t + P*dx/(2*D)*b_first_t
         return b_t
     
-
+    A_sub = A_sub_second + P*dx/(2*D)*A_sub_first
+    A_sup = A_sup_second + P*dx/(2*D)*A_sup_first
     #TODO note that this is not the most efficient way to do this, but it is the most general
     return A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind
 
@@ -584,7 +600,10 @@ def lin_solve_sparse(A_sub, A_diag, A_sup, b):
     u = scipy.sparse.linalg.spsolve(A, b)
     return u
 
-def second_order_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'np_solve',P = 0):
+
+
+
+def second_order_solve(bc_left, bc_right,q, p, N, D=1,P = 0, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'np_solve'):
     """
     Solves the Poisson equation for a given grid, boundary conditions and source term.
     Parameters:
@@ -604,20 +623,16 @@ def second_order_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None),
         u (np array): solution to the Poisson equation
         grid.x (np array): grid points
     """
+    if D == 0:
+        raise ValueError("D must be non-zero, use solve_to if you want to solve a first order system of ODEs.")
     #form grid
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
 
     # find diagonals of matrix A and vector b given boundary conditions
     #set up variables left_ind and right_ind that determine the first and last grid values used in the solver
-    A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b_second(grid, bc_left, bc_right)
+    A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right,D,P)
     A_diag,b = A_diag_func(np.nan), b_func(np.nan)
-
-    #A_sub_first, A_diag_first, A_sup_first, b_first = construct_A_diags_b_first(grid, bc_left, bc_right)
-
-    #make diagonals of matrix A and vector b that encapsulate 1st and second order derivatives
-    #for vecs in [(A_sub,A_deriv_sub),(A_diag,A_deriv_diag),(A_sup,A_deriv_sup),(b,b_deriv)]:
-
 
     #choose solver
     lin_solve = choose_lin_solve(solver)
@@ -673,7 +688,7 @@ def second_order_solve(bc_left, bc_right,q, p, N, D=1, u_innit = np.array(None),
     return u, grid.x
 
 
-def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , explicit_solver = 'RK4' ,implicit_solver = False):
+def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None , explicit_solver = 'RK4' ,implicit_solver = False):
     """
     Solves the diffusion equation for given boundary conditions, initial conditions, source term, and diffusion coefficient.
     Parameters:
@@ -699,21 +714,33 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
     dx = grid.dx
 
     #find diagonals of matrix A and vector b given boundary conditions
-    A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b_second(grid, bc_left, bc_right)
-    #set up u0
+    A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right,D,P)
+    
+    #set up initial condition u0
     u0 = f(grid.x[left_ind:right_ind],t0)
 
+    #if a linear solver is specified by the user, 
+    #solve the system using the implicit Euler method.
     if implicit_solver:
         #choose linear system solver
         lin_solve = choose_lin_solve(implicit_solver)
+        
+        #choose a default dt value if not specified
         if not dt:
-            dt = dx**2/(2*D) #choose a default dt value
+            dt = dx**2/(2*D) 
+
+        #initialise constant C
         C = (dt* D)/(dx**2)
+
+        #discretise in time
         t = discr_t(t0,t_f,dt)
+
         #initialise solution array
         u = np.zeros((len(u0),len(t)))
         u[:,0] = u0
         u_n = u0
+
+        #iterate through time, solving the implicit system at each time step for u_n+1
         for i,t_n in enumerate(t[:-1]):
             #construct diagonals of matrix M = I-CA at time t_n
             M_diag = 1 - C * A_diag_t(t_n)
@@ -727,6 +754,7 @@ def diffusion_solve(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1, dt = None , ex
             u_n = u_n_plus_1
 
 
+    #Otherwise, solve the system using an explicit method (Euler or RK4 depending on user input).
     else:
         #define du_dt as a function of u and t
         def du_dt(u,t,p):
