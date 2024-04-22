@@ -5,7 +5,6 @@ import scipy.optimize as opt
 import inspect
 import matplotlib.pyplot as plt
 #%% Functions
-#one-step solvers wrapper
 def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
@@ -262,7 +261,7 @@ def natural_p_cont_bif(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 50, LC 
     #define root finder (depending on wether we're looking for LCs or not)
     if LC:
         def solve_func(x_T,p):
-            res = np.append(LC_residual(ode,p,x_T,delta_max),phase_cond(ode,p,x_T))
+            res = np.append(LC_residual(ode,p,x_T,delta_max),phase_cond(ode,p,x_T[0:-1],x_T[-1]))
             return res
         
     else:
@@ -375,7 +374,7 @@ def pseudo_arc_bif(ode,p0,p_ind,x0,T0 = 0,no_it = 50  ,innit_h= 1e-3,LC=True, de
     #define function for fixed points
     if LC:
         def fixed_point_func(x_T,p):
-            res = np.append(LC_residual(ode,p,x_T,delta_max = delta_max),phase_cond(ode,p,x_T))
+            res = np.append(LC_residual(ode,p,x_T,delta_max = delta_max),phase_cond(ode,p,x_T[:-1],x_T[-1]))
             return res
         
     else:
