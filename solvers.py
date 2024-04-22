@@ -5,12 +5,12 @@ import scipy.optimize as opt
 import inspect
 import matplotlib.pyplot as plt
 #%% Functions
-def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
+def solve_to(ode, p, x0, t0, t_f, delta_max = 1e-3, solver = 'RK4'):
     """
     Applies one-step solvers to systems of odes from initial conditions to 
     to the specified endpoint.
     Parameters:
-        f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
+        ode (function): function of x (np array), t (float), and p (np array) describing system of odes
         p (np array, float or int): parameter(s) of system of equations
         x0 (np array): initial conditions for the system
         t0 (float): initial time
@@ -19,14 +19,14 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
         solver (string): solver used
     Returns:
         x (np array): 2D array where each row is a time series of the state variables over discretisation of time
-        t (np array): value of time at every computed x
+        t (np array): discretised time array
 
     """
     #assert that the parameters are of the right type
-    p,_ = param_assert(p)
+    p = param_assert(p)
 
     #hard encode the parameter to make the function of x and t only
-    f = lambda x,t: f_gen(x,t,p)
+    f = lambda x,t: ode(x,t,p)
 
     #choose one-step solver
     if solver == 'Euler':
@@ -41,28 +41,32 @@ def solve_to(f_gen,p,x0,t0,t_f, delta_max,solver = 'RK4'):
     total_time = t_f - t0
     if total_time <= 2*delta_max:
         print("The duration of the integration is shorther than delta max")
-        return np.array([x0]),t0
+        #return initial conditions and time, adding a dimension to x0 to make it a 2D array for consistency
+        return x0[x0[:],None],t0
 
     #initialise t and x arrays
     t = discr_t(t0,t_f,delta_max)
     x = np.zeros((len(x0),len(t)))
+
+    #add initial conditions to x array
     x[:,0] = x0
+
     x_n = x0
     h = delta_max
 
+    #iterate over time steps, solving for x_n+1 at each step
     for i,t_n in enumerate(t[:-2]):
-        #iterate through functions, computing the next value for each state variable
         x_n = solve_step(f,x_n,t_n,h)
         x[:,i+1] = x_n
 
-    #adapts size of final time-step to compute solution at t_f
+    #adapt size of final time-step to compute solution at t_f exactly
     h = t_f - t[-2] 
     x[:,-1] = solve_step(f,x_n,t[-2],h)
     return x,t
 
-def discr_t(t0,t_f,delta_max):
+def discr_t(t0, t_f, delta_max):
     """
-    Discretises time for numerical integration
+    Discretises time for numerical integration.
     Parameters:
         t0 (float): initial time
         t_f (float): final time
@@ -75,59 +79,53 @@ def discr_t(t0,t_f,delta_max):
     return t
 
 
-def param_assert(p0, pend=None):
+def param_assert(p):
     """
-    Asserts that the parameters are the same type as each other and are either floats, integers, or numpy arrays.
-    Converts single float or int to a one-element numpy array for consistency.
+    Asserts that the parameters are a number or a numpy array. If the parameters are a number, converts them to a numpy array for consistency.
     Parameters:
-        p0 (float, int, or np.array): Initial parameter(s) of the system of equations.
-        pend (float, int, or np.array, optional): End parameter(s) of the system of equations. Defaults to None.
+        p (np array, float or int): parameter(s) of system of equations
     Returns:
-        p0 (np.array): Initial parameter(s) of the system of equations.
-        pend (np.array): End parameter(s) of the system of equations. If pend is None, returns None.
+        p (np array): parameter(s) of system of equations
     """
-    # Check if p0 is a float or an int, and if so, convert to a numpy array with a single element
-    if isinstance(p0, (float, int)):
-        p0 = np.array([p0], dtype = float)
-        pend = np.array([pend], dtype = float) if pend is not None else None
-    elif isinstance(p0, np.ndarray):
-        # If p0 is an array, ensure pend is also an array and has the same shape
-        assert pend is None or isinstance(pend, np.ndarray), "system parameters must be np.ndarray, float, or int type"
-        assert pend is None or p0.shape == pend.shape, "p0 and pend should have the same shape"
+    # Check if p is a float or an int, and if so, convert to a numpy array with a single element
+    if isinstance(p, (float, int)):
+        p = np.array([p], dtype = float)
+    # Check if p is a numpy array
+    elif isinstance(p, np.ndarray):
+        p = p
+    # If p is not a float, int, or numpy array, raise an error
     else:
         raise ValueError("system parameters must be np.ndarray, float, or int type")
-    return p0, pend
+    return p
 
 
 
 #one step solver functions
-def euler_step(f,x_n,t_n,h):
+def euler_step(f, x_n, t_n, h):
     """
     Computes one step of numerical integration using Euler method
     Parameters:
-        f (function): function determining system in terms of x and t
+        f (function): function determining ODE system in terms of x and t
         x_n (np array): current values of space variables
         t_n (float): current value of time
         h (float): size of Euler step
     Returns:
         x_n_plus_1 (np array): updated state of variables after euler step
-        t_n_plus_1 (float): updated value of time after euler step
     """
     x_n_plus_1 = x_n + h*f(x_n,t_n)
     return x_n_plus_1
 
-def rk4_step(f,x_n,t_n,h):
+def rk4_step(f, x_n, t_n, h):
     """
     Computes one step of numerical integration using Runge Kutta 4th order method (RK4)
 
     Parameters:
-        f (function): function determining system in terms of x and t
+        f (function): function determining ODE system in terms of x and t
         x_n (np array): current values of space variables
         t_n (float): current value of time
         h (float): size of RK4 step
     Returns:
         x_n_plus_1 (np array): updated state of variables after RK4 step
-        t_n_plus_1 (float): updated value of time after RK4 step
         """
     k1 = f(x_n,t_n)
     k2 = f(x_n + h*k1/2,t_n + h/2)
@@ -137,64 +135,76 @@ def rk4_step(f,x_n,t_n,h):
     return x_n_plus_1
 
 
-
-def LC_residual(ode,p,x,T, delta_max = 1e-3,solver = 'RK4'):
+#default boundary condition function for limit cycles
+def LC_residual(ode, p, xs):
     """
-    Computes the residual limit cycles (LC) for a system of ODEs (x(T) - x(0))
+    Computes the residual of limit cycles (LC) for a system of ODEs (x(T) - x(0))
+    (ode definition and parameter(s) p are included so that Neumann BCs can be used and parameter-dependent BVPs can be solved by the shoot-solve function)
     Parameters:
         ode (function): function of x (np array), t (float), and p (np array) describing system of odes
-        p (np array): parameters of system of equations
-        x_T (np array): point on the LC (includes period as last element of the array)
-        delta_max (float): max step size
+        p (np array): parameter(s) of system of equations
+        xs (np array): array of state variables at each time step (as solved by solve_to function)
     Returns:
         res (np array): array of residuals of the limit cycle problem
     """
-    #solve from t=0 to t=T
-    x,_ = solve_to(ode,p,x,0,T,delta_max, solver= solver)
-    #compute residuals
-    res = x[:,-1] - x[:,0]
+    #compute residuals x(T) - x(0)
+    res = xs[:,-1] - xs[:,0]
     return res
 
-def default_pc(ode,p,x,T):
+#default phase condition function for limit cycles
+def default_pc(ode, p, xs):
     """
     Default phase condition for numerical shooting, zero velocity in the first state variable at time t = 0.
     Parameters:
         ode (function): function of x (np array), t (float), and p (np array) describing system of odes
         p (np array): parameters of system of equations
-        x_T (np array): point on the LC (includes period as last element of the array)
+        xs (np array): array of state variables at each time step (as solved by solve_to function)
     Returns:
         res (np array): array of residuals of the phase condition
     """
-    return ode(x,0,p)[0]
+    #extract the state variables at time t = 0
+    x0 = xs[:,0]
+    #determine the velocity in the first state variable at time t = 0
+    return ode(x0,0,p)[0]
 
 
-def shoot_solve(f_gen,p,x0,T0, delta_max,solver = 'RK4',phase_cond=default_pc):
+def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond = LC_residual, phase_cond=default_pc):
     """
-    Finds a point on an ODE system's limit cycle (LC) and it's period using  numerical shooting method.
+    Solves BVPs using the shooting method.
+    The default setup aims to find a point x on a limit cycle, and the period T of the limit cycle, such that x(T) = x(0).
+    However, the boundary condition and phase condition functions can be changed to solve other BVPs.
+        e.g. 1: to solve a boundary value problem of the form dx/dt = f(x) and x(T) = x_f,
+            set boundary_cond = lambda ode,p,xs: xs[:,-1] - x_f 
+        e.g. 2: to solve a boundary value problem of the form dx/dt = f(x) and x'(T) = v_f,
+            set boundary_cond = lambda ode,p,xs: ode(xs[:,-1],T,p) - v_f 
+        In each of these cases, the output will be the initial value of x and the period of integration T required to satisfy the boundary condition.
     Parameters:
-        f_gen (function): function of x (np array), t (float), and p (np array) describing system of odes
-        p (np array,float or integer): parameter(s) of system of equations
+        ode (function): function of x (np array), t (float), and p (np array) describing system of odes
+        p (np array, float or integer): parameter(s) of system of ODEs
         x0 (np array): initial guess for point on the LC
         T0 (float): initial guess for the period of the LC
         delta_max (float): max step size in the numerical integration
         solver (string): solver used
         phase_cond (function): function of the ODE, p, x and t that describes the phase condition of the LC
     Returns:
-        x (np array): solved initial condition to the Limit Cycle
+        x (np array): point on the Limit Cycle
         T (float): period of the Limit Cycle
     """
-    p,_ = param_assert(p)
-
-    
+    p = param_assert(p)
     #define function to root solve using fsolve
     def g(x_T):
-        x,T = x_T[:-1],x_T[-1]
-        BC = LC_residual(f_gen,p,x,T,delta_max,solver = solver)
-        PC = phase_cond(f_gen,p,x,T)
+        #split x and T from x_T
+        x0,T = x_T[:-1],x_T[-1]
+        #run numerical integration to x(T)
+        xs,_ = solve_to(ode,p,x0,0,T,delta_max = delta_max, solver= solver)
+        #compute boundary condition residuals
+        BC = boundary_cond(ode,p,xs)
+        PC = phase_cond(ode,p,xs)
         res = np.append(BC,PC)
         return res
     
     #initialise initial space variable and period guess
+    #these are concatenated into a single array for the root solver
     x_T0 = np.append(x0,T0)
 
     #run scipy newton root-finder on g with initial guess
@@ -221,7 +231,7 @@ def natural_p_cont(residual_func, p0, p_ind, x0,h = 1e-2, N=50, tol = 1e-3):
         ps (np array): array of parameter values
     """
     #check that p0 and pend are the same type and length
-    p0,_ = param_assert(p0)
+    p0 = param_assert(p0)
 
     p_end = p0[p_ind] + N*h
     p_vary = np.linspace(p0[p_ind], p_end, N)
@@ -255,7 +265,7 @@ def pseudo_arc(residual_func,p0,p_ind,x0,N = 50 ,h= 1e-3, tol = 1e-3):
         tol (float): tolerance of the root solver
     """
     #assert that the parameters are of the right type
-    p0,_ = param_assert(p0)
+    p0 = param_assert(p0)
     #find first value using initial guess
     x0 = opt.fsolve(residual_func,x0, args = (p0))
     #do a step of natural parameter continuation to find v1
@@ -340,8 +350,9 @@ def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-
         if T0 <= 0:
             raise ValueError("Positive initial guess for the period of the LC is required")
         def fixed_point_func(x_T,p):
-            x,T = x_T[:-1],x_T[-1]
-            res = np.append(LC_residual(ode,p,x,T,delta_max),phase_cond(ode,p,x,T))
+            x0,T = x_T[:-1],x_T[-1]
+            xs,_ = solve_to(ode,p,x0,0,T,delta_max=delta_max,solver=solver)
+            res = np.append(LC_residual(ode,p,xs),phase_cond(ode,p,xs))
             return res      
     else:
         if T0:
