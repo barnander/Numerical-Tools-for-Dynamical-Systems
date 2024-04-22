@@ -138,7 +138,7 @@ def rk4_step(f,x_n,t_n,h):
 
 
 
-def LC_residual(ode,p,x_T, delta_max = 1e-3,solver = 'RK4'):
+def LC_residual(ode,p,x,T, delta_max = 1e-3,solver = 'RK4'):
     """
     Computes the residual limit cycles (LC) for a system of ODEs (x(T) - x(0))
     Parameters:
@@ -150,7 +150,7 @@ def LC_residual(ode,p,x_T, delta_max = 1e-3,solver = 'RK4'):
         res (np array): array of residuals of the limit cycle problem
     """
     #solve from t=0 to t=T
-    x,_ = solve_to(ode,p,x_T[:-1],0,x_T[-1],delta_max, solver= solver)
+    x,_ = solve_to(ode,p,x,0,T,delta_max, solver= solver)
     #compute residuals
     res = x[:,-1] - x[:,0]
     return res
@@ -188,8 +188,9 @@ def shoot_solve(f_gen,p,x0,T0, delta_max,solver = 'RK4',phase_cond=default_pc):
     
     #define function to root solve using fsolve
     def g(x_T):
-        BC = LC_residual(f_gen,p,x_T,delta_max,solver = solver)
-        PC = phase_cond(f_gen,p,x_T[:-1],x_T[-1])
+        x,T = x_T[:-1],x_T[-1]
+        BC = LC_residual(f_gen,p,x,T,delta_max,solver = solver)
+        PC = phase_cond(f_gen,p,x,T)
         res = np.append(BC,PC)
         return res
     
@@ -206,7 +207,7 @@ def shoot_solve(f_gen,p,x0,T0, delta_max,solver = 'RK4',phase_cond=default_pc):
     T = x_T[-1]
     return x, T
 
-def natural_p_cont(residual_func, p0, pend, x0, n=50):
+def natural_p_cont(residual_func, p0, p_ind, x0,h = 1e-2, N=50, tol = 1e-3):
     """
     Performs natural parameter continuation on a residual function.
     Parameters:
@@ -220,61 +221,28 @@ def natural_p_cont(residual_func, p0, pend, x0, n=50):
         ps (np array): array of parameter values
     """
     #check that p0 and pend are the same type and length
-    p0,pend = param_assert(p0,pend)
+    p0,_ = param_assert(p0)
+
+    p_end = p0[p_ind] + N*h
+    p_vary = np.linspace(p0[p_ind], p_end, N)
+
     #initialise parameter array and solution array
-    x = np.zeros((np.size(x0),n))
-    ps = np.linspace(p0,pend,n)
-    for i,p in enumerate(ps):
+    x = np.zeros((np.size(x0),N))
+    ps = np.zeros((np.size(p0),N))
+    p_n = p0.astype(float)
+    for i,p in enumerate(p_vary):
+        p_n[p_ind] = p
         #find equilibria/LCs
-        xi = opt.fsolve(residual_func,x0,args = (p))
+        xi = opt.fsolve(residual_func, x0, args = (p_n), xtol=tol)
         #add result to results array
         x[:,i] = xi
+        ps[:,i] = p_n
         #update initial guess for next iteration
         x0 = xi
-    #add finall value 
-    x[:,i] = xi
-    ps = ps.transpose()
     return x,ps
 
-def natural_p_cont_bif(ode, p0, pend, x0, T0 = 0 , delta_max = 1e-2, n = 50, LC = False, phase_cond=default_pc):
-    """
-    Performs natural parameter continuation to find equlibria and/or equilibria of system of ODEs (bifurcation analysis)
-    Parameters:
-        ode (function): function of x (np array), t (float), and p (np array, integer or float) describing system of odes
-        p0 (np array): initial parameter value(s)
-        pend (np array): final parameter value(s)
-        x_T0 (np array): initial guess for the system (include initial period guess for LCs as last element of the array)
-        delta_max (float): max step size of the numerical solver
-        n (int): number of steps in the parameter continuation
-        LC  (bool): if False, only equilibrium solutions are computed (not Limit Cycles)
-        phase_cond (function): function of the ode, p and x that describes the phase condition of the LC
-    Returns: 
-        x (np array): array of equilibrium points or points on the limit cycle for each parameter value
-        T (np array): array of periods of the limit cycles for each parameter value (0 if equilibrium points are computed)
-        ps (np array): array of parameter values
-    """
-    #check that p0 and pend are the same type, length and that only one parameter changes:
-    #p0,pend = param_assert(p0,pend)
-    #initialise parameter array and solution array
-    #x_T = np.zeros((np.size(x0)+1,n))
-    #ps = np.linspace(p0,pend,n)
-    #define root finder (depending on wether we're looking for LCs or not)
-    if LC:
-        def solve_func(x_T,p):
-            res = np.append(LC_residual(ode,p,x_T,delta_max),phase_cond(ode,p,x_T[0:-1],x_T[-1]))
-            return res
-        
-    else:
-        def solve_func(x_T,p):
-            return np.append(ode(x_T[:-1],0,p),0)
 
-    x_T0 = np.append(x0,T0)
-    x_T,ps = natural_p_cont(solve_func,p0,pend,x_T0,n = n)
-    x = x_T[:-1,:]
-    T = x_T[-1,:]
-    return x,T,ps
-
-def pseudo_arc(residual_func,p0,p_ind,x0,no_it = 50 ,innit_h= 1e-3, tol = 1e-3):
+def pseudo_arc(residual_func,p0,p_ind,x0,N = 50 ,h= 1e-3, tol = 1e-3):
     """
     Performs pseudo-arclength continuation on residual function.
     Parameters:
@@ -282,7 +250,7 @@ def pseudo_arc(residual_func,p0,p_ind,x0,no_it = 50 ,innit_h= 1e-3, tol = 1e-3):
         p0 (np array): initial parameter value(s)
         p_ind (int): index of the parameter that changes
         x0 (np array): initial guess for the system
-        no_it (int): number of iterations
+        N (int): number of iterations
         innit_h (float): step size of initial natural parameter continuation step
         tol (float): tolerance of the root solver
     """
@@ -292,13 +260,13 @@ def pseudo_arc(residual_func,p0,p_ind,x0,no_it = 50 ,innit_h= 1e-3, tol = 1e-3):
     x0 = opt.fsolve(residual_func,x0, args = (p0))
     #do a step of natural parameter continuation to find v1
     p1 = p0.copy()
-    p1[p_ind] = p0[p_ind] + innit_h 
+    p1[p_ind] = p0[p_ind] + h 
     
     x1 = opt.fsolve(residual_func,x0, args = (p1))
 
     #initialise array of solutions
-    x = np.zeros((len(x0),int(no_it)+2))
-    ps = np.zeros((len(p0),int(no_it)+2))
+    x = np.zeros((len(x0),int(N)+2))
+    ps = np.zeros((len(p0),int(N)+2))
     #and add values for v0 and v1
     x[:,0] = x0
     x[:,1] = x1
@@ -308,8 +276,7 @@ def pseudo_arc(residual_func,p0,p_ind,x0,no_it = 50 ,innit_h= 1e-3, tol = 1e-3):
     v0 = np.append(p0[p_ind],x0)
     v1 = np.append(p1[p_ind],x1)
     p_sol = p0.copy()
-
-    for i in range(int(no_it)):
+    for i in range(int(N)):
         #take a step of pseudo-arclength continuation and add to solutions array
         v2 = pseudo_arc_step(residual_func,v0,v1,p_sol,p_ind,tol)
         x[:,i+2] = v2[1:]
@@ -348,44 +315,51 @@ def pseudo_arc_step(residual_func, v0,v1,p_sol,p_ind,tol):
         func_cond = residual_func(v2[1:],p_sol)
         residuals = np.append(pseudo_cond,func_cond)
         return residuals
-    
     #find v2 using fsolve
-    v2 = opt.fsolve(root_solve,v1,xtol=tol)
+    v2 = opt.fsolve(root_solve,v_pred,xtol=tol)
     return v2
 
-def pseudo_arc_bif(ode,p0,p_ind,x0,T0 = 0,no_it = 50  ,innit_h= 1e-3,LC=True, delta_max = 1e-3, phase_cond=default_pc):
+def choose_continuation(cont_name):
     """
-    Performs pseudo-arclength continuation on system of ODEs.
+    Chooses the continuation method based on the input string.
     Parameters:
-        ode (function): function of x (np array), t (float), and p (np array, integer or float) describing system of odes
-        p0 (np array): initial parameter value(s)
-        p_ind (int): index of the parameter that changes
-        x0 (np array): initial guess for the system 
-        T0 (float): initial guess for the period of the LC
-        no_it (int): maximum number of iterations
-        innit_h (float): step size of initial natural parameter continuation step
-        LC (bool): if False, only equilibrium solutions are computed (not Limit Cycles)
-        delta_max (float): max step size of the numerical solver
+        cont_name (str): name of the continuation method
     Returns:
-        x_T (np array): array of equilibrium points or points on the limit cycle for each parameter value
-        T (np array): array of periods of the limit cycles for each parameter value (0s if equilibrium points are computed)
-        ps (np array): array of parameter values
+        function: the continuation function (function of the form cont_func(residual_func, p0, pend, x0, n=50))
     """
-    #define function for fixed points
-    if LC:
-        def fixed_point_func(x_T,p):
-            res = np.append(LC_residual(ode,p,x_T,delta_max = delta_max),phase_cond(ode,p,x_T[:-1],x_T[-1]))
-            return res
-        
+    if cont_name == 'natural_param':
+        return natural_p_cont
+    elif cont_name == 'pseudo_arc':
+        return pseudo_arc
     else:
+        raise ValueError("Unsupported continuation method: {}".format(cont_name))
+    
+def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-2, delta_max = 1e-2, phase_cond=default_pc, solver = 'RK4', cont = 'natural_param'):
+    
+    if LC:
+        if T0 <= 0:
+            raise ValueError("Positive initial guess for the period of the LC is required")
         def fixed_point_func(x_T,p):
+            x,T = x_T[:-1],x_T[-1]
+            res = np.append(LC_residual(ode,p,x,T,delta_max),phase_cond(ode,p,x,T))
+            return res      
+    else:
+        if T0:
+            raise ValueError("Initial guess for the period of the LC must equal 0 when computing equilibria")
+        def fixed_point_func(x_T,p):
+            #we append a 0 to the end of the array to represent the "period of the LC" for equilibria
             return np.append(ode(x_T[:-1],0,p),0)
+          
+    #choose continuation method
+    param_cont = choose_continuation(cont)
     x_T0 = np.append(x0,T0)
 
     #for stability reasons, the tolerance of the root finder should be higher than that of the integrator
-    x_T,ps = pseudo_arc(fixed_point_func,p0,p_ind,x_T0,no_it=no_it,innit_h=innit_h,tol = 1.1*delta_max)
-    return x_T[:-1,:],x_T[-1,:],ps
-
+    tol = 1.1*delta_max
+    #run continuation
+    x_Ts,ps = param_cont(fixed_point_func,p0,p_ind,x_T0,N = N,h = h, tol = tol)
+    xs, Ts = x_Ts[:-1,:], x_Ts[-1,:]
+    return xs, Ts, ps
 
 
 
@@ -461,7 +435,8 @@ class Grid():
 
 def construct_A_diags_b(grid, bc_left, bc_right,D,P):
     """
-    Constructs the diagonals of tridiagonal matrix A and the vector b for the Poisson equation given the grid and boundary conditions.
+    Constructs the diagonals of tridiagonal matrix A and the vector b to represent a second order ODE in the form Au + b.
+    The second order ODE is of the form Du'' + Pu'.
     Parameters:
         grid (Grid): grid object defining space discretisation
         bc_left (Boundary_Condition): left boundary condition
@@ -832,8 +807,15 @@ def meth_lines(bc_left, bc_right, f,t0,t_f, q , p, N, D = 1,P=0, dt = None , imp
     return u, grid.x, t
 
 
-# %% Plotting Modules
+# %% Plotting Module
 def plot_3D_sol(u,x,t):
+    """
+    Plots a 3D surface plot of a solution to a PDE.
+    Parameters:
+        u (np array): solution to the PDE
+        x (np array): grid points in space
+        t (np array): grid points in time
+    """
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     X, T = np.meshgrid(x, t)
@@ -842,3 +824,4 @@ def plot_3D_sol(u,x,t):
     ax.set_ylabel('t')
     ax.set_zlabel('u')
     plt.show()
+    return
