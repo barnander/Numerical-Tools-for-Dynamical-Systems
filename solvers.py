@@ -369,12 +369,11 @@ def parameter_continuation(cont_type, residual_func, p0, x0, p_ind = 0, h= 1e-1,
         cont = pseudo_arc
     else:
         raise ValueError("Unsupported continuation method: {}".format(cont_type))
-    
     return cont(residual_func, p0, p_ind, x0, h = h, N = N, tol = tol)
     
 
 
-def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-2, delta_max = 1e-2, phase_cond=default_pc, solver = 'RK4', cont_type = 'natural_param'):
+def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-2, delta_max = 1e-2, phase_cond=default_pc, solver = 'RK4', cont_type = 'natural'):
     """
     Tracks equilibria or points on limit cycles of a system of ODEs as a parameter is varied.
     Parameters:
@@ -413,9 +412,8 @@ def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-
     x_T0 = np.append(x0,T0)
     #for stability reasons, the tolerance of the root finder should be higher than that of the integrator
     tol = 1.01*delta_max
-
     #run continuation
-    x_Ts,ps = parameter_continuation(cont_type, fixed_point_func, p0, p_ind, x_T0, N = N, h = h, tol = tol)
+    x_Ts,ps = parameter_continuation(cont_type, fixed_point_func, p0, x_T0, p_ind = p_ind, N = N, h = h, tol = tol)
     xs, Ts = x_Ts[:-1,:], x_Ts[-1,:]
     return xs, Ts, ps
 
@@ -783,6 +781,7 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
         u (np array): solution to the Poisson equation
         grid.x (np array): grid points
     """
+    p = param_assert(p)
     if D == 0:
         raise ValueError("D must be non-zero, use solve_to if you want to solve a first order system of ODEs.")
     #form grid
@@ -792,6 +791,7 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
     # find diagonals of matrix A and vector b given boundary conditions
     #set up variables left_ind and right_ind that determine the first and last grid values used in the solver
     A_sub, A_diag_func, A_sup, b_func, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right,D,P)
+    #There is no time dependency so compute constant vectors fo the system
     A_diag,b = A_diag_func(np.nan), b_func(np.nan)
 
     #choose solver
@@ -822,20 +822,15 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
             eps = 1e-6
             dq_du = lambda u, x, p: (q(u + eps, x, p) - q(u - eps, x, p)) / (2 * eps)
         
-        #define Jacobian of source term
-        J_q = np.diag(dq_du(u,grid.x[left_ind:right_ind], p))
+        A = reform_A(A_sub,A_diag,A_sup)
         #solve for u using Newton's method
         for i in range(max_iter):
-            #form matrix A
-            A = reform_A(A_sub,A_diag,A_sup)
             #compute discretised residual
             F = A@u + b + q(u,grid.x[left_ind:right_ind], p)
             #define Jacobian of the system
-            J_F = A + J_q
-            #extract diagonals of Jacobian
-            J_sub, J_diag, J_sup = np.diag(J_F,-1), np.diag(J_F,0), np.diag(J_F,1)
+            J_F_diag = A_diag + dq_du(u,grid.x[left_ind:right_ind], p)
             #solve for correction V using linear solver
-            V = lin_solve(J_sub,J_diag,J_sup,-F)
+            V = lin_solve(A_sub,J_F_diag,A_sup,-F)
             #update u
             u += v*V
             #check for convergence
@@ -849,7 +844,7 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
     return u, grid.x
 
 
-def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, implicit = True, explicit_solver = 'RK4' ,implicit_solver = 'thomas'):
+def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, method = "implicit", explicit_solver = 'RK4' ,implicit_solver = 'thomas'):
     """
     Solves PDEs of the form u_t = D*u_xx + P*u_x + q(u,x,t,p) using the method of lines.
     Parameters:
@@ -870,6 +865,7 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, im
         grid.x (np array): space grid points
         t (np array): time grid points 
     """
+    p = param_assert(p)
     #discretise in space
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
@@ -882,7 +878,7 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, im
 
     #if a linear solver is specified by the user, 
     #solve the system using the implicit Euler method.
-    if implicit:
+    if method == "imex":
         #choose linear system solver
         lin_solve = choose_lin_solve(implicit_solver)
         
@@ -898,14 +894,14 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, im
         u[:,0] = u0
         u_n = u0
 
-        #iterate through time, solving the implicit (IMEX) system at each time step for u_n+1
+        #iterate through time, solving the implicit-explicit (IMEX) system at each time step for u_n+1
         for i,t_n in enumerate(t[:-1]):
             #construct diagonals of matrix M = I-CA at time t_n
             M_diag = 1 - dt * A_diag_t(t_n)
             M_sub = -dt * A_sub
             M_sup = -dt * A_sup
             #construct vector d = u + C*b + dt *q at time t_n
-            d = u_n + dt*b_t(t_n)+ dt *q(u_n,grid.x[left_ind:right_ind],t,p)
+            d = u_n + dt*b_t(t_n)+ dt *q(u_n,grid.x[left_ind:right_ind],t_n,p)
             #solve for u_n+1 
             u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
             u[:,i+1] = u_n_plus_1
