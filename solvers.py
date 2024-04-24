@@ -167,8 +167,19 @@ def default_pc(ode, p, xs):
     #determine the velocity in the first state variable at time t = 0
     return ode(x0,0,p)[0]
 
+def choose_num_int(num_int_name):
+    if num_int_name == "solve_to":
+        return solve_to
+    elif num_int_name == "solve_ivp":
+        def solve_ivp(ode, p, x0, t0, t_f, delta_max = 1e-3, solver = 'RK45'):
+            integration = scipy.integrate.solve_ivp(lambda t,x,p: ode(x,t,p),(t0,t_f),x0,args=(p,),max_step=delta_max,method=solver)
+            if integration.success:
+                return integration.y, integration.t
+            else:
+                raise RuntimeError("Integration failed")
+        return solve_ivp
 
-def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond = LC_residual, phase_cond=default_pc):
+def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond = LC_residual, phase_cond=default_pc, num_int_name = "solve_to"):
     """
     Solves BVPs using the shooting method.
     The default setup aims to find a point x on a limit cycle, and the period T of the limit cycle, such that x(T) = x(0).
@@ -192,12 +203,13 @@ def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond 
         T (float): period of the Limit Cycle or period of the BVP
     """
     p = param_assert(p)
+    num_int = choose_num_int(num_int_name)
     #define function to root solve using fsolve
     def g(x_T):
         #split x and T from x_T
         x0,T = x_T[:-1],x_T[-1]
         #run numerical integration to x(T)
-        xs,_ = solve_to(ode,p,x0,0,T,delta_max = delta_max, solver= solver)
+        xs,_ = num_int(ode,p,x0,0,T,delta_max = delta_max, solver= solver)
         #compute boundary condition residuals
         BC = boundary_cond(ode,p,xs)
         PC = phase_cond(ode,p,xs)
@@ -373,7 +385,7 @@ def parameter_continuation(cont_type, residual_func, p0, x0, p_ind = 0, h= 1e-1,
     
 
 
-def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-2, delta_max = 1e-2, phase_cond=default_pc, solver = 'RK4', cont_type = 'natural'):
+def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-2, delta_max = 1e-2, phase_cond=default_pc, solver = 'RK4', cont_type = 'natural', num_int_name = "solve_to"):
     """
     Tracks equilibria or points on limit cycles of a system of ODEs as a parameter is varied.
     Parameters:
@@ -393,9 +405,10 @@ def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-
     if LC:
         if T0 <= 0:
             raise ValueError("Positive initial guess for the period of the LC is required")
+        num_int = choose_num_int(num_int_name)
         def fixed_point_func(x_T,p):
             x0,T = x_T[:-1],x_T[-1]
-            xs,_ = solve_to(ode,p,x0,0,T,delta_max=delta_max,solver=solver)
+            xs,_ = num_int(ode,p,x0,0,T,delta_max=delta_max,solver=solver)
             res = np.append(LC_residual(ode,p,xs),phase_cond(ode,p,xs))
             return res      
     else:
@@ -761,16 +774,20 @@ def lin_solve_sparse(A_sub, A_diag, A_sup, b):
     return u
 
 
-def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None), v = 1, dq_du = None, max_iter = 100, tol = 1e-6, solver = 'np_solve'):
+def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None), v = 1, dq_du = None, solver = 'thomas', max_iter = 100, tol = 1e-6, num_int_name = "solve_to"):
     """
-    Solves the Poisson equation for a given grid, boundary conditions and source term.
+    Solves 2nd order ODEs of the form Du'' + Pu' + q((u),x,p) = 0 using finite differences.
+    If the source term is linear, the linear system that comes from finite differencing is solved directly.
+    If the source term is non-linear, Newton's method is used to solve the system.
+    The linearity of the system is determined by the number of arguments of the source term function.
     Parameters:
         bc_left (Boundary_Condition): left boundary condition
         bc_right (Boundary_Condition): right boundary condition
-        N (int): number of grid points
         q (function): source term, function of (u), x, and p
         p (np array): parameter(s) of the source term
+        N (int): number of grid points
         D (float): diffusion coefficient
+        P (float): convection coefficient
         u_innit (np array): initial guess for the solution
         v (float): damping factor for Newton's method (0<v<=1)
         dq_du (function): derivative of the source term with respect to u
@@ -808,6 +825,7 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
         u = lin_solve(A_sub,A_diag,A_sup,c)
 
     elif n_args == 3:
+        num_int = choose_num_int(num_int_name)
         #solve non-linear system using Newton's method
         #initialise first guess for u
         if u_innit.any() == None:
@@ -823,6 +841,8 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
             dq_du = lambda u, x, p: (q(u + eps, x, p) - q(u - eps, x, p)) / (2 * eps)
         
         A = reform_A(A_sub,A_diag,A_sup)
+
+
         #solve for u using Newton's method
         for i in range(max_iter):
             #compute discretised residual
@@ -838,13 +858,14 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
                 print(f"Newton method converged within the tolerance after {i} iterations")
                 break
 
+
     #add boundary conditions to solution for Dirichlet boundary conditions
     u = bc_left.add_left(u)
     u = bc_right.add_right(u)
     return u, grid.x
 
 
-def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, method = "implicit", explicit_solver = 'RK4' ,implicit_solver = 'thomas'):
+def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, method = "imex", explicit_solver = 'RK4' ,linear_solver = 'thomas', tol = 1e-3, num_int_name = "solve_to"):
     """
     Solves PDEs of the form u_t = D*u_xx + P*u_x + q(u,x,t,p) using the method of lines.
     Parameters:
@@ -859,7 +880,7 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, me
         D (float): coefficient of the second space derivative term (default is 1)
         dt (float): time step size of the time integration (default is dx^2/(2*D))
         explicit_solver (string): solver used for explicit time integration
-        implicit_solver (string): solver used for to solve the linear system in implicit euler method
+        linear_solver (string): solver used for to solve the linear system in implicit euler method
     Returns:
         u (np array): solution to the diffusion equation
         grid.x (np array): space grid points
@@ -870,19 +891,47 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, me
     grid = Grid(N,bc_left.x,bc_right.x)
     dx = grid.dx
 
-    #find diagonals of matrix A and vector b given boundary conditions
+    #finite difference method to find diagonals of matrix A and vector b
     A_sub, A_diag_t, A_sup, b_t, left_ind, right_ind = construct_A_diags_b(grid, bc_left, bc_right,D,P)
     
     #set up initial condition u0
     u0 = f(grid.x[left_ind:right_ind],t0)
 
-    #if a linear solver is specified by the user, 
-    #solve the system using the implicit Euler method.
-    if method == "imex":
+    #find number of arguments to q to determine if the ODE system resulting from 
+    #the finite difference discretisation is linear or non-linear.
+    n_args = len(inspect.signature(q).parameters)
+    if n_args == 3:
+        #define q as a function of u, x, t and p as explicit methods are the
+        #same for linear and non-linear source terms.
+        def q_u(u,x,t,p):
+            return q(x,t,p)
+    elif n_args == 4:
+        q_u = q
+    else:
+        raise ValueError("Source term must be a function of u, x, t and p or x, t and p.")
+
+
+    if method == "explicit":
+        num_int = choose_num_int(num_int_name)
+        #define du_dt as a function of u, t and p
+        def du_dt(u,t,p):
+            A = reform_A(A_sub,A_diag_t(t),A_sup)
+            b = b_t(t)
+            return (A @ u + b) + q_u(u,grid.x[left_ind:right_ind],t,p)
+        #ensure stablilty of the time integration
+        dt_stable = dx**2/(2*D)
+        if not dt:
+            #default value of dt to ensure stability
+            dt = dt_stable
+        elif dt > dt_stable:
+            raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
+        #solve using one-step solver
+        u, t = num_int(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
+
+    elif method == "implicit" or method == "imex":
         #choose linear system solver
-        lin_solve = choose_lin_solve(implicit_solver)
+        lin_solve = choose_lin_solve(linear_solver)
         
-        #choose a default dt value if not specified
         if not dt:
             raise ValueError("dt must be specified for implicit methods")
 
@@ -894,41 +943,39 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, me
         u[:,0] = u0
         u_n = u0
 
-        #iterate through time, solving the implicit-explicit (IMEX) system at each time step for u_n+1
-        for i,t_n in enumerate(t[:-1]):
-            #construct diagonals of matrix M = I-CA at time t_n
-            M_diag = 1 - dt * A_diag_t(t_n)
-            M_sub = -dt * A_sub
-            M_sup = -dt * A_sup
-            #construct vector d = u + C*b + dt *q at time t_n
-            d = u_n + dt*b_t(t_n)+ dt *q(u_n,grid.x[left_ind:right_ind],t_n,p)
-            #solve for u_n+1 
-            u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
-            u[:,i+1] = u_n_plus_1
-            u_n = u_n_plus_1
+        #solve linear systems at each time-step for implicit methods (imex or linear implicit euler)
+        if n_args == 3 or method == "imex":
+            for i,t_n in enumerate(t[:-1]):
+            #construct diagonals of matrix M = I - dt * A at time t_n
+                M_diag = 1 - dt * A_diag_t(t_n)
+                M_sub = -dt * A_sub
+                M_sup = -dt * A_sup
+                #construct vector d = u + C*b + dt *q_u at time t_n
+                d = u_n + dt*b_t(t_n)+ dt * q_u(u_n,grid.x[left_ind:right_ind],t_n,p)
+                #solve for u_n+1 
+                u_n_plus_1 = lin_solve(M_sub,M_diag,M_sup,d)
+                u[:,i+1] = u_n_plus_1
+                u_n = u_n_plus_1
 
-
-    #Otherwise, solve the system using an explicit method (Euler or RK4 depending on user input).
+        #solve non-linear system at each time-step for implicit euler using scipy's fsolve
+        else:
+            for i,t_n in enumerate(t[:-1]):
+                A_diag = A_diag_t(t_n)
+                A = reform_A(A_sub,A_diag,A_sup)
+                b = b_t(t_n)
+                #define residual function
+                F = lambda u_n_plus_1 : A @ u_n_plus_1 + b + q_u(u_n_plus_1,grid.x[left_ind:right_ind],t_n,p) - (u_n_plus_1 - u_n)/dt
+                #solve for u_n+1 using fsolve
+                u_n_plus_1 = opt.fsolve(F,u_n,xtol=tol)
+                u_n = u_n_plus_1
+                u[:,i+1] = u_n
     else:
-        #define du_dt as a function of u, t and p
-        def du_dt(u,t,p):
-            A = reform_A(A_sub,A_diag_t(t),A_sup)
-            b = b_t(t)
-            return (A @ u + b) + q(u,grid.x[left_ind:right_ind],t,p)
-        #ensure stablilty of the time integration
-        dt_stable = dx**2/(2*D)
-        if not dt:
-            #default value of dt to ensure stability
-            dt = dt_stable
-        elif dt > dt_stable:
-            raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
-        #solve using one-step solver
-        u, t = solve_to(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
+        raise ValueError("Unsupported method: {}".format(method))
+    
     #add boundary conditions to solution for Dirichlet boundary conditions
     u = bc_left.add_left(u,t)
     u = bc_right.add_right(u,t)
     return u, grid.x, t
-
 
 # %% Plotting Module
 def plot_3D_sol(u,x,t):
