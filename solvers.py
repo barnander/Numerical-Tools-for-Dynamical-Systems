@@ -168,16 +168,24 @@ def default_pc(ode, p, xs):
     return ode(x0,0,p)[0]
 
 def choose_num_int(num_int_name):
+    """
+    Defines numerical integrating function and returns it based on the input string.
+    If scipy's solve_ivp is chosen, a wrapper function is defined that formats the inputs to solve_ivp in the same way as the inputs to solve_to.
+    Parameters:
+        num_int_name (str): name of the numerical integrator to be used
+    Returns:
+        num_int (function): numerical integration function (function of the form num_int(ode, p, x0, t0, t_f, delta_max = 1e-3, solver = 'RK4'))
+        """
     if num_int_name == "solve_to":
-        return solve_to
+        num_int = solve_to
     elif num_int_name == "solve_ivp":
-        def solve_ivp(ode, p, x0, t0, t_f, delta_max = 1e-3, solver = 'RK45'):
+        def num_int(ode, p, x0, t0, t_f, delta_max = 1e-3, solver = 'RK45'):
             integration = scipy.integrate.solve_ivp(lambda t,x,p: ode(x,t,p),(t0,t_f),x0,args=(p,),max_step=delta_max,method=solver)
             if integration.success:
                 return integration.y, integration.t
             else:
                 raise RuntimeError("Integration failed")
-        return solve_ivp
+    return num_int
 
 def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond = LC_residual, phase_cond=default_pc, num_int_name = "solve_to"):
     """
@@ -198,6 +206,7 @@ def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond 
         solver (string): solver used in the numerical integration
         boundary_cond (function): function of the system of ODEs, p, xs (2D array of state variables at each point in discretised time, as computed by numerical integration) and t that describes the boundary condition of the shooting method
         phase_cond (function): function of the system of ODEs, p, xs (nu) and t that describes the phase condition of the shooting method
+        num_int_name (str): name of the numerical integrator to be used
     Returns:
         x (np array): point on the Limit Cycle or initial condition for the BVP
         T (float): period of the Limit Cycle or period of the BVP
@@ -401,6 +410,7 @@ def bifurcation_analysis(ode, p0, x0, p_ind = 0, T0 = 0, N = 50, LC=True, h= 1e-
         phase_cond (function): function of the system of ODEs, p and xs that describes the phase condition of the shooting method
         solver (str): solver used in the numerical integration
         cont_type (str): type of the continuation method
+        num_int_name (str): name of numerical integrator to be used
     """
     if LC:
         if T0 <= 0:
@@ -774,7 +784,7 @@ def lin_solve_sparse(A_sub, A_diag, A_sup, b):
     return u
 
 
-def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None), v = 1, dq_du = None, solver = 'thomas', max_iter = 100, tol = 1e-6, num_int_name = "solve_to"):
+def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None), v = 1, dq_du = None, solver = 'thomas', max_iter = 100, tol = 1e-6):
     """
     Solves 2nd order ODEs of the form Du'' + Pu' + q((u),x,p) = 0 using finite differences.
     If the source term is linear, the linear system that comes from finite differencing is solved directly.
@@ -825,7 +835,6 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
         u = lin_solve(A_sub,A_diag,A_sup,c)
 
     elif n_args == 3:
-        num_int = choose_num_int(num_int_name)
         #solve non-linear system using Newton's method
         #initialise first guess for u
         if u_innit.any() == None:
@@ -879,8 +888,9 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, me
         N (int): number of grid points in space
         D (float): coefficient of the second space derivative term (default is 1)
         dt (float): time step size of the time integration (default is dx^2/(2*D))
-        explicit_solver (string): solver used for explicit time integration
-        linear_solver (string): solver used for to solve the linear system in implicit euler method
+        explicit_solver (str): solver used for explicit time integration
+        linear_solver (str): solver used for to solve the linear system in implicit euler method
+        num_int_name (str): name of numerical integrator to be used
     Returns:
         u (np array): solution to the diffusion equation
         grid.x (np array): space grid points
@@ -923,7 +933,7 @@ def meth_lines(bc_left, bc_right, f, t0, t_f, q, p, N, D = 1, P=0, dt = None, me
         if not dt:
             #default value of dt to ensure stability
             dt = dt_stable
-        elif dt > dt_stable:
+        elif dt > dt_stable and explicit_solver == "Euler":
             raise ValueError('dt must be smaller or equal to dx^2/(2*D) for explicit Euler method (where dx is granularity of the grid in space)')
         #solve using one-step solver
         u, t = num_int(du_dt,p,u0,t0,t_f,dt,solver = explicit_solver)
