@@ -16,7 +16,7 @@ def solve_to(ode, p, x0, t0, t_f, delta_max = 1e-3, solver = 'RK4'):
         t0 (float): initial time
         t_f (float): final time
         delta_max (float): max step size
-        solver (string): solver used
+        solver (str): solver used
     Returns:
         x (np array): 2D array where each row is a time series of the state variables over discretisation of time
         t (np array): discretised time array
@@ -203,7 +203,7 @@ def shoot_solve(ode, p, x0, T0, delta_max = 1e-2, solver = 'RK4', boundary_cond 
         x0 (np array): initial guess for point on the LC (or other BVP)
         T0 (float): initial guess for the period of the LC (or other BVP)
         delta_max (float): max step size used in the numerical integration
-        solver (string): solver used in the numerical integration
+        solver (str): solver used in the numerical integration
         boundary_cond (function): function of the system of ODEs, p, xs (2D array of state variables at each point in discretised time, as computed by numerical integration) and t that describes the boundary condition of the shooting method
         phase_cond (function): function of the system of ODEs, p, xs (nu) and t that describes the phase condition of the shooting method
         num_int_name (str): name of the numerical integrator to be used
@@ -803,7 +803,7 @@ def finite_diff(bc_left, bc_right, q, p, N, D=1,P = 0, u_innit = np.array(None),
         dq_du (function): derivative of the source term with respect to u
         max_iter (int): maximum number of iterations for Newton's method
         tol (float): tolerance for Newton's method
-        solver (string): solver used for linear systems
+        solver (str): solver used for linear systems
     Returns:
         u (np array): solution to the Poisson equation
         grid.x (np array): grid points
