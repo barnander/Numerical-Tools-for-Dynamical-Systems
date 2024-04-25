@@ -122,7 +122,7 @@ class Test_Poisson_Solve(unittest.TestCase):
         f = lambda x,t: np.sin(math.pi*x)
         q = lambda u,x,t,p: np.zeros(len(x))
         p = np.nan
-        u,x,t = solvers.meth_lines(bc_left, bc_right, f,t0,t_f,q , p, N,D = D,implicit_solver='thomas', dt = dt)
+        u,x,t = solvers.meth_lines(bc_left, bc_right, f,t0,t_f,q , p, N,D = D,linear_solver='thomas', dt = dt)
         self.assertAlmostEqual(u[500,-1], np.exp(-0.2*math.pi**2),places=3)
 if __name__ == '__main__':
     unittest.main()
