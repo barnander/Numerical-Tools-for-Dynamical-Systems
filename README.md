@@ -1,2 +1,2 @@
 # EMAT30008
-Scientific Computing Coursework
+Tools for numerical analysis of ordinary and partial differential equations including numerical solvers and bifurcation trackers.
